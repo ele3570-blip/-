@@ -95,7 +95,7 @@ const rnEdges = RN.edges.map(([a, b, c, l, tagged, oneway, lenM, flat], id) => {
   const cum = [0];
   for (let k = 1; k < pts.length; k++) cum.push(cum[k - 1] + Math.hypot(pts[k][0] - pts[k - 1][0], pts[k][1] - pts[k - 1][1]));
   rnNodes[a].adj.push(id); rnNodes[b].adj.push(id);
-  return { id, a, b, c, l, pts, cum, len: cum[cum.length - 1] };
+  return { id, a, b, c, l, o: !!oneway, pts, cum, len: cum[cum.length - 1] }; // o: 일방통행(a→b만)
 });
 // 그리기: 등급·차선 수별로 묶어 Path2D 하나씩 (km 좌표)
 const roadLayers = (() => {
@@ -119,11 +119,13 @@ for (const e of rnEdges) for (let k = 0; k + 1 < e.pts.length; k++) {
       segGrid.get(key).push([e, k]);
     }
 }
+// 정류장 근처 도로 후보들: 가장 가까운 도로 + 그보다 50m 안쪽으로 더 먼 도로들
+// (양방향 정류장을 합쳐 놓아서, 일방통행 차로가 둘로 나뉜 길이면 양쪽 차로가 모두 후보)
 const snapCache = new Map();
 function snapStop(s) {
   if (snapCache.has(s.id)) return snapCache.get(s.id);
-  let best = null;
-  for (let rad = 1; rad <= 4 && !best; rad++) { // 약 250m씩 넓혀가며
+  const byEdge = new Map();
+  for (let rad = 1; rad <= 4 && !byEdge.size; rad++) { // 약 250m씩 넓혀가며
     const gx = Math.floor(s.x / SEG_GRID), gy = Math.floor(s.y / SEG_GRID);
     for (let i = gx - rad; i <= gx + rad; i++) for (let j = gy - rad; j <= gy + rad; j++) {
       for (const [e, k] of segGrid.get(i + ',' + j) || []) {
@@ -131,12 +133,15 @@ function snapStop(s) {
         const dx = x2 - x1, dy = y2 - y1, L2 = dx * dx + dy * dy;
         const t = L2 ? Math.max(0, Math.min(1, ((s.x - x1) * dx + (s.y - y1) * dy) / L2)) : 0;
         const px = x1 + dx * t, py = y1 + dy * t, d = Math.hypot(s.x - px, s.y - py);
-        if (!best || d < best.d) best = { e, d, x: px, y: py, along: e.cum[k] + Math.sqrt(L2) * t };
+        const cur = byEdge.get(e.id);
+        if (!cur || d < cur.d) byEdge.set(e.id, { e, d, x: px, y: py, along: e.cum[k] + Math.sqrt(L2) * t });
       }
     }
   }
-  snapCache.set(s.id, best);
-  return best;
+  const all = [...byEdge.values()].sort((a, b) => a.d - b.d);
+  const cands = all.length ? all.filter(c => c.d <= all[0].d + 0.05).slice(0, 6) : [];
+  snapCache.set(s.id, cands);
+  return cands;
 }
 // 도로 구간 e에서 along 위치 from → to 사이 점들 (방향 상관없이)
 function edgePart(e, from, to) {
@@ -146,58 +151,84 @@ function edgePart(e, from, to) {
   return out;
 }
 function polyLen(pts) { let L = 0; for (let k = 1; k < pts.length; k++) L += Math.hypot(pts[k][0] - pts[k - 1][0], pts[k][1] - pts[k - 1][1]); return L; }
-// 정류장 사이 도로를 따라가는 최단 경로 → { pts, km }
+// 정류장 사이 도로를 따라가는 최단 경로 → { pts, km }. 일방통행을 지키므로 방향마다 다를 수 있음
 const pathCache = new Map();
+const heapPush = (h, item) => { h.push(item); let i = h.length - 1; while (i > 0) { const p = (i - 1) >> 1; if (h[p][0] <= h[i][0]) break; [h[p], h[i]] = [h[i], h[p]]; i = p; } };
+const heapPop = h => { const top = h[0], last = h.pop(); if (h.length) { h[0] = last; let i = 0; for (;;) { const l = 2 * i + 1, r = l + 1; let m = i; if (l < h.length && h[l][0] < h[m][0]) m = l; if (r < h.length && h[r][0] < h[m][0]) m = r; if (m === i) break; [h[m], h[i]] = [h[i], h[m]]; i = m; } } return top; };
 function roadPath(id1, id2) {
   const key = id1 + '>' + id2;
   if (pathCache.has(key)) return pathCache.get(key);
-  const rev = pathCache.get(id2 + '>' + id1);
-  if (rev) { const r = { pts: rev.pts.slice().reverse(), km: rev.km, road: rev.road }; pathCache.set(key, r); return r; }
   const s1 = stops[id1], s2 = stops[id2];
-  const straight = { pts: [[s1.x, s1.y], [s2.x, s2.y]], km: distKm(s1, s2) * CFG.detour, road: false };
-  const A = snapStop(s1), B = snapStop(s2);
-  let res = straight;
-  if (A && B) {
-    let core;
-    if (A.e === B.e) core = { pts: [[A.x, A.y], ...edgePart(A.e, A.along, B.along), [B.x, B.y]] };
-    else {
-      // 다익스트라: A 도로 구간의 양 끝 노드에서 출발
-      const dist = new Map(), prev = new Map(), heap = [];
-      const push = (n, d, via) => { if (d < (dist.get(n) ?? Infinity)) { dist.set(n, d); prev.set(n, via); heap.push([d, n]); let i = heap.length - 1; while (i > 0) { const p = (i - 1) >> 1; if (heap[p][0] <= heap[i][0]) break; [heap[p], heap[i]] = [heap[i], heap[p]]; i = p; } } };
-      const pop = () => { const top = heap[0], last = heap.pop(); if (heap.length) { heap[0] = last; let i = 0; for (;;) { const l = 2 * i + 1, r = l + 1; let m = i; if (l < heap.length && heap[l][0] < heap[m][0]) m = l; if (r < heap.length && heap[r][0] < heap[m][0]) m = r; if (m === i) break; [heap[m], heap[i]] = [heap[i], heap[m]]; i = m; } } return top; };
-      push(A.e.a, A.along, null); push(A.e.b, A.e.len - A.along, null);
-      const goal = new Set([B.e.a, B.e.b]); let found = 0;
-      const limit = distKm(s1, s2) * 4 + 3;
-      while (heap.length) {
-        const [d, n] = pop();
-        if (d > (dist.get(n) ?? Infinity)) continue;
-        if (d > limit) break;
-        if (goal.has(n) && ++found === 2) break;
-        for (const eid of rnNodes[n].adj) { const e = rnEdges[eid]; push(e.a === n ? e.b : e.a, d + e.len, eid); }
-      }
-      const viaA = (dist.get(B.e.a) ?? Infinity) + B.along, viaB = (dist.get(B.e.b) ?? Infinity) + (B.e.len - B.along);
-      if (Math.min(viaA, viaB) < Infinity) {
-        const endNode = viaA <= viaB ? B.e.a : B.e.b;
-        const nodePath = [endNode], edgePath = [];
-        for (let n = endNode; prev.get(n) != null;) { const e = rnEdges[prev.get(n)]; edgePath.unshift(e); n = e.a === n ? e.b : e.a; nodePath.unshift(n); }
-        const startNode = nodePath[0];
-        const pts = [[A.x, A.y], ...edgePart(A.e, A.along, startNode === A.e.a ? 0 : A.e.len)];
-        edgePath.forEach((e, k) => { const from = nodePath[k]; const seq = from === e.a ? e.pts : e.pts.slice().reverse(); pts.push(...seq); });
-        if (!edgePath.length) pts.push([rnNodes[startNode].x, rnNodes[startNode].y]);
-        pts.push(...edgePart(B.e, endNode === B.e.a ? 0 : B.e.len, B.along), [B.x, B.y]);
-        core = { pts };
+  let res = { pts: [[s1.x, s1.y], [s2.x, s2.y]], km: distKm(s1, s2) * CFG.detour, road: false };
+  const As = snapStop(s1), Bs = snapStop(s2);
+  if (As.length && Bs.length) {
+    let best = null; // { cost, pts }
+    // 1) 같은 도로 구간 위에서 바로 가는 경우
+    for (const A of As) for (const B of Bs) {
+      if (A.e !== B.e || (A.e.o && B.along < A.along)) continue;
+      const cost = A.d + B.d + Math.abs(B.along - A.along);
+      if (!best || cost < best.cost) best = { cost, pts: [[A.x, A.y], ...edgePart(A.e, A.along, B.along), [B.x, B.y]] };
+    }
+    // 2) 다익스트라: 출발 후보 도로의 끝 노드들에서 시작 (일방통행이면 진행 방향 끝만)
+    const dist = new Map(), prev = new Map(), heap = [];
+    const relax = (n, d, via) => { if (d < (dist.get(n) ?? Infinity)) { dist.set(n, d); prev.set(n, via); heapPush(heap, [d, n]); } };
+    for (const A of As) {
+      if (!A.e.o) relax(A.e.a, A.d + A.along, { src: A, end: 'a' });
+      relax(A.e.b, A.d + A.e.len - A.along, { src: A, end: 'b' });
+    }
+    const goals = new Set(); for (const B of Bs) { goals.add(B.e.a); if (!B.e.o) goals.add(B.e.b); }
+    const limit = distKm(s1, s2) * 4 + 3;
+    let left = goals.size;
+    while (heap.length && left > 0) {
+      const [d, n] = heapPop(heap);
+      if (d > (dist.get(n) ?? Infinity)) continue;
+      if (d > limit) break;
+      if (goals.has(n)) left--;
+      for (const eid of rnNodes[n].adj) {
+        const e = rnEdges[eid];
+        if (e.o && e.a !== n) continue; // 일방통행 역방향 금지
+        relax(e.a === n ? e.b : e.a, d + e.len, { eid });
       }
     }
-    if (core) {
-      const pts = [[s1.x, s1.y], ...core.pts, [s2.x, s2.y]];
+    for (const B of Bs) {
+      const ends = B.e.o ? [['a', B.along]] : [['a', B.along], ['b', B.e.len - B.along]];
+      for (const [end, extra] of ends) {
+        const node = end === 'a' ? B.e.a : B.e.b, d = dist.get(node);
+        if (d == null) continue;
+        const cost = d + extra + B.d;
+        if (best && cost >= best.cost) continue;
+        // 경로 복원
+        const edges = []; let n = node, via = prev.get(n);
+        while (via && via.eid != null) { const e = rnEdges[via.eid]; edges.unshift([e, e.b === n]); n = e.b === n ? e.a : e.b; via = prev.get(n); }
+        const A = via.src;
+        const pts = [[A.x, A.y], ...edgePart(A.e, A.along, via.end === 'a' ? 0 : A.e.len)];
+        pts.push([rnNodes[n].x, rnNodes[n].y]);
+        for (const [e, fwd] of edges) pts.push(...(fwd ? e.pts : e.pts.slice().reverse()).slice(1));
+        pts.push(...edgePart(B.e, end === 'a' ? 0 : B.e.len, B.along), [B.x, B.y]);
+        best = { cost, pts };
+      }
+    }
+    if (best) {
+      const pts = [[s1.x, s1.y], ...best.pts, [s2.x, s2.y]];
       const km = polyLen(pts);
-      if (km < distKm(s1, s2) * 4 + 0.5) res = { pts, km, road: true }; // 너무 돌아가면 직선으로
+      if (km < distKm(s1, s2) * 4 + 1) res = { pts, km, road: true }; // 너무 돌아가면 직선으로
     }
   }
   pathCache.set(key, res);
   return res;
 }
-// 경로 위 거리 d(km) 지점의 좌표와 방향
+// 경로 위 거리 d(km) 지점의 좌표와 진행 방향
+function pointAlongDir(pts, d) {
+  for (let k = 1; k < pts.length; k++) {
+    const dx = pts[k][0] - pts[k - 1][0], dy = pts[k][1] - pts[k - 1][1], L = Math.hypot(dx, dy);
+    if (d <= L || k === pts.length - 1) {
+      const f = L ? Math.max(0, Math.min(1, d / L)) : 0;
+      return [pts[k - 1][0] + dx * f, pts[k - 1][1] + dy * f, dx, dy];
+    }
+    d -= L;
+  }
+  return [pts[0][0], pts[0][1], 1, 0];
+}
 function pointAlong(pts, d) {
   for (let k = 1; k < pts.length; k++) {
     const L = Math.hypot(pts[k][0] - pts[k - 1][0], pts[k][1] - pts[k - 1][1]);
@@ -257,12 +288,14 @@ function rebuildNetwork() {
   for (const r of G.routes) {
     r.idxOf = new Map(r.stops.map((id, i) => [id, i]));
     // 정류장 사이: 도로를 따라가는 경로와 길이
-    r.geom = [];
+    // geom[i]/segLen[i]: 정류장 i → i+1, geomB[i]/segLenB[i]: i+1 → i (왕복 노선의 돌아오는 길. 일방통행이면 다를 수 있음)
+    r.geom = []; r.geomB = []; r.segLenB = [];
     r.segLen = r.stops.map((id, i) => {
       const j = r.loop ? (i + 1) % r.stops.length : i + 1;
-      if (j >= r.stops.length) { r.geom.push(null); return 0; }
+      if (j >= r.stops.length) { r.geom.push(null); r.geomB.push(null); r.segLenB.push(0); return 0; }
       const P = roadPath(id, r.stops[j]);
       r.geom.push(P.pts);
+      if (!r.loop) { const Q = roadPath(r.stops[j], id); r.geomB.push(Q.pts); r.segLenB.push(Q.km); }
       return P.km;
     });
     // near: 목적지 정류장 → 내릴 정류장 인덱스 (걸어서 갈 수 있는 거리 안에서 가장 가까운 곳)
@@ -282,6 +315,7 @@ function rebuildNetwork() {
   }
   covered = new Set();
   for (const r of G.routes) for (const id of r.near.keys()) covered.add(id);
+  assignRouteSlots();
   // 승객 계획 다시 짜기(노선이 바뀌었을 수 있음)
   for (const [sid, q] of G.waiting) {
     const keep = [];
@@ -353,7 +387,7 @@ function hourShare(t) {
 function headway(r) {
   const n = G.buses.filter(b => b.route === r).length;
   if (!n) return Infinity;
-  const km = r.segLen.reduce((a, b) => a + b, 0) * (r.loop ? 1 : 2);
+  const km = r.segLen.reduce((a, b) => a + b, 0) + (r.loop ? 0 : r.segLenB.reduce((a, b) => a + b, 0));
   const cycle = km / CFG.busSpeedKmPerMin + r.stops.length * (r.loop ? 1 : 2) * (CFG.dwellBase + 0.1);
   return cycle / n;
 }
@@ -475,7 +509,7 @@ function stepBuses(dt) {
       if (b.dwell > 0) { const u = Math.min(b.dwell, rem); b.dwell -= u; rem -= u; continue; }
       if (b.d === 0 && shouldHold(b)) { b.dwell = CFG.holdStep; b.held = (b.held || 0) + CFG.holdStep; continue; }
       const { j, dir } = busNextIndex(b);
-      const len = b.route.loop ? b.route.segLen[b.i] : b.route.segLen[Math.min(b.i, j)];
+      const len = segInfo(b.route, b.i, j).len;
       const sp = CFG.busSpeedKmPerMin * busTier(b).speedMul;
       const need = (len - b.d) / sp;
       if (need > rem) { b.d += rem * sp; rem = 0; }
@@ -640,23 +674,32 @@ function buyStop(s) {
 }
 
 // 노선 한 바퀴 위에서 버스 위치(km). 왕복 노선은 갔다 오는 길이 전체가 한 바퀴
+// 정류장 i에서 j로 갈 때의 경로와 길이
+function segInfo(r, i, j) {
+  if (r.loop || j > i) return { pts: r.geom[i], len: r.segLen[i] };
+  return { pts: r.geomB[j], len: r.segLenB[j] };
+}
 function cycleInfo(r) {
-  const cum = [0];
-  for (let i = 1; i < r.stops.length; i++) cum.push(cum[i - 1] + r.segLen[i - 1]);
-  const L = r.loop ? cum[cum.length - 1] + r.segLen[r.stops.length - 1] : cum[cum.length - 1];
-  return { cum, L, C: r.loop ? L : 2 * L };
+  const n = r.stops.length, cum = [0];
+  for (let i = 1; i < n; i++) cum.push(cum[i - 1] + r.segLen[i - 1]);
+  const L = r.loop ? cum[n - 1] + r.segLen[n - 1] : cum[n - 1];
+  if (r.loop) return { cum, L, C: L };
+  // bcum[i]: 끝 정류장에서 돌아와 i까지 온 거리
+  const bcum = new Array(n).fill(0);
+  for (let i = n - 2; i >= 0; i--) bcum[i] = bcum[i + 1] + r.segLenB[i];
+  return { cum, bcum, L, C: L + bcum[0] };
 }
 function busCyclePos(b, ci) {
   if (b.route.loop) return ci.cum[b.i] + b.d;
   const { dir } = busNextIndex(b);
-  return dir > 0 ? ci.cum[b.i] + b.d : 2 * ci.L - ci.cum[b.i] + b.d;
+  return dir > 0 ? ci.cum[b.i] + b.d : ci.L + ci.bcum[b.i] + b.d;
 }
 // 새 버스를 기존 버스 사이 가장 큰 빈틈의 가운데 정류장에 둔다
 function placeBus(r) {
   const ci = cycleInfo(r), n = r.stops.length;
   const slots = [];
   for (let i = 0; i < (r.loop ? n : n - 1); i++) slots.push({ i, dir: 1, p: ci.cum[i] });
-  if (!r.loop) for (let i = n - 1; i >= 1; i--) slots.push({ i, dir: -1, p: 2 * ci.L - ci.cum[i] });
+  if (!r.loop) for (let i = n - 1; i >= 1; i--) slots.push({ i, dir: -1, p: ci.L + ci.bcum[i] });
   const pos = G.buses.filter(b => b.route === r).map(b => busCyclePos(b, ci) % ci.C).sort((a, b) => a - b);
   let target = 0;
   if (pos.length) {
@@ -695,7 +738,7 @@ function unlock(gu) {
 }
 
 // ───────────────────────── 저장 ─────────────────────────
-const SAVE_KEY = 'daegu-bus-save-v4'; // v4: 양방향 정류장 통합으로 정류장 번호가 바뀜
+const SAVE_KEY = 'daegu-bus-save-v5'; // v5: 작은 길 정류장 제외로 정류장 번호가 바뀜
 function save() {
   const bus = b => ({ id: b.id, type: b.type, lvl: b.lvl });
   const s = { rep: G.rep, money: G.money, day: G.day, unlocked: [...G.unlocked], nextRouteNo: G.nextRouteNo, nextBusId: G.nextBusId,
@@ -751,15 +794,14 @@ function fitGu(g) {
 
 let hoverStop = null, selected = null, drawing = null, mouse = { x: 0, y: 0 };
 
+// 버스 위치 [x, y, 진행방향 dx, dy, 돌아오는 길인지]
 function busPos(b) {
   const r = b.route, a = stops[r.stops[b.i]];
-  if (b.d <= 0) return [a.x, a.y];
   const { j } = busNextIndex(b);
-  const seg = r.loop ? b.i : Math.min(b.i, j);
-  const pts = r.geom[seg], len = r.segLen[seg];
-  if (!pts) return [a.x, a.y];
-  const forward = r.loop || j > b.i;
-  return pointAlong(pts, Math.min(len, forward ? b.d : len - b.d) * (polyLenCached(pts) / (len || 1)));
+  const { pts, len } = segInfo(r, b.i, j);
+  if (!pts) return [a.x, a.y, 1, 0, false];
+  const back = !r.loop && j < b.i;
+  return [...pointAlongDir(pts, Math.min(len, b.d) * (polyLenCached(pts) / (len || 1))), back];
 }
 function polyLenCached(pts) { return pts._len ?? (pts._len = polyLen(pts)); }
 
@@ -770,6 +812,43 @@ function tracePath(ids, loop) {
   ctx.moveTo(sx(stops[ids[0]].x), sy(stops[ids[0]].y));
   const n = ids.length, last = loop ? n : n - 1;
   for (let k = 0; k < last; k++) for (const [x, y] of roadPath(ids[k], ids[(k + 1) % n]).pts) ctx.lineTo(sx(x), sy(y));
+}
+
+// ── 겹치는 노선 나란히 그리기 ──
+// 노선마다 '차선 번호'를 정한다: 같은 도로 점을 공유하는 노선끼리는 서로 다른 번호
+function assignRouteSlots() {
+  const keyOf = ([x, y]) => Math.round(x * 2000) + ',' + Math.round(y * 2000); // 0.5m 격자
+  const sets = G.routes.map(r => {
+    const set = new Set();
+    for (const g of [...r.geom, ...(r.geomB || [])]) if (g) for (const p of g) set.add(keyOf(p));
+    return set;
+  });
+  const order = [0, 1, -1, 2, -2, 3, -3, 4, -4];
+  G.routes.forEach((r, i) => {
+    const taken = new Set();
+    for (let k = 0; k < i; k++) {
+      let shared = 0;
+      for (const key of sets[k]) if (sets[i].has(key) && ++shared >= 3) break;
+      if (shared >= 3) taken.add(G.routes[k].slot);
+    }
+    r.slot = order.find(o => !taken.has(o)) ?? 0;
+  });
+}
+function routeOffsetPx(r) { return (r.slot || 0) * Math.max(3, Math.min(6, cam.z / 60)); }
+// 화면 좌표에서 진행 방향 왼쪽으로 off(px)만큼 띄운 선을 현재 패스에 잇는다
+function traceOffset(pts, off) {
+  const P = pts.map(([x, y]) => [sx(x), sy(y)]);
+  for (let i = 0; i < P.length; i++) {
+    let nx = 0, ny = 0;
+    for (const [a, b] of [[i - 1, i], [i, i + 1]]) {
+      if (a < 0 || b >= P.length) continue;
+      const dx = P[b][0] - P[a][0], dy = P[b][1] - P[a][1], L = Math.hypot(dx, dy);
+      if (L > 0.01) { nx += -dy / L; ny += dx / L; }
+    }
+    const L = Math.hypot(nx, ny);
+    const X = L ? P[i][0] + nx / L * off : P[i][0], Y = L ? P[i][1] + ny / L * off : P[i][1];
+    i === 0 ? ctx.moveTo(X, Y) : ctx.lineTo(X, Y);
+  }
 }
 
 function stopRadius(s) { return Math.max(2.2, Math.min(14, Math.sqrt(s.on) / 7)) * Math.min(1.6, Math.max(0.6, cam.z / 120)); }
@@ -844,8 +923,11 @@ function draw() {
 
   // 노선
   for (const r of G.routes) {
+    // 같은 도로를 지나는 노선끼리는 옆으로 나란히 (돌아오는 길은 진행 방향이 반대라 부호를 바꿔 같은 쪽에)
+    const off = routeOffsetPx(r);
     ctx.beginPath();
-    r.geom.forEach((pts, k) => { if (pts) pts.forEach(([x, y], i) => (k === 0 && i === 0) ? ctx.moveTo(sx(x), sy(y)) : ctx.lineTo(sx(x), sy(y))); });
+    for (const pts of r.geom) if (pts) traceOffset(pts, off);
+    for (const pts of r.geomB || []) if (pts) traceOffset(pts, -off);
     ctx.strokeStyle = r.color; ctx.lineWidth = selected && selected.type === 'route' && selected.r === r ? 7 : 4;
     ctx.lineJoin = 'round'; ctx.globalAlpha = 0.85; ctx.stroke(); ctx.globalAlpha = 1;
   }
@@ -903,8 +985,9 @@ function draw() {
 
   // 버스
   for (const b of G.buses) {
-    const [x, y] = busPos(b);
-    const X = sx(x), Y = sy(y);
+    const [x, y, dx, dy, back] = busPos(b);
+    const nl = Math.hypot(dx, dy) || 1, o = routeOffsetPx(b.route) * (back ? -1 : 1);
+    const X = sx(x) - dy / nl * o, Y = sy(y) + dx / nl * o;
     ctx.fillStyle = b.route.color;
     const tier = busTier(b);
     const K = busType(b), hw = K.w / 2, hh = K.h / 2;

@@ -10,6 +10,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 P = lambda *a: os.path.join(ROOT, *a)
 CLUSTER_M = 120
 PAIR_M = 400  # 이름이 같은 양방향 정류장(앞/건너 등)은 이 거리 안이면 하나로
+ROAD_M = 40   # 큰 도로(집산도로 이상)에서 이보다 먼 정류장은 작은 길 정류장으로 보고 뺀다
 SIMPLIFY_DEG = 0.00015  # 약 15m
 
 
@@ -61,6 +62,38 @@ def pair_key(n):
     return n
 
 
+def road_distance_fn():
+    """도로망(web/roads.js)에서 가장 가까운 도로까지 거리(m)를 재는 함수. 파일이 없으면 None"""
+    path = P("web/roads.js")
+    if not os.path.exists(path):
+        return None
+    txt = open(path, encoding="utf-8").read()
+    rn = json.loads(txt.split("window.ROADNET = ", 1)[1].rstrip(";\n"))
+    kx, ky = 111320 * math.cos(math.radians(35.87)), 110540
+    N, G, grid = rn["nodes"], 300.0, {}
+    for a, b, *_rest, flat in rn["edges"]:
+        pts = [(N[2 * a], N[2 * a + 1])] + [(flat[k], flat[k + 1]) for k in range(0, len(flat), 2)] + [(N[2 * b], N[2 * b + 1])]
+        pts = [(x * kx, y * ky) for x, y in pts]
+        for (x1, y1), (x2, y2) in zip(pts, pts[1:]):
+            for gx in range(int(min(x1, x2) // G), int(max(x1, x2) // G) + 1):
+                for gy in range(int(min(y1, y2) // G), int(max(y1, y2) // G) + 1):
+                    grid.setdefault((gx, gy), []).append((x1, y1, x2, y2))
+
+    def dist(lon, lat):
+        px, py = lon * kx, lat * ky
+        best = 1e9
+        gx, gy = int(px // G), int(py // G)
+        for i in range(gx - 1, gx + 2):
+            for j in range(gy - 1, gy + 2):
+                for x1, y1, x2, y2 in grid.get((i, j), []):
+                    dx, dy = x2 - x1, y2 - y1
+                    L2 = dx * dx + dy * dy
+                    t = 0 if not L2 else max(0, min(1, ((px - x1) * dx + (py - y1) * dy) / L2))
+                    best = min(best, math.hypot(px - x1 - dx * t, py - y1 - dy * t))
+        return best
+    return dist
+
+
 def main():
     dongs = []
     for f in json.load(open(P("data/daegu_dong.geojson"), encoding="utf-8"))["features"]:
@@ -105,9 +138,20 @@ def main():
         if tgt is None:
             merged.append(c)
             continue
-        for k in ("on", "off", "n", "sx", "sy", "w"):
+        # 승객 수만 더하고 위치는 승객이 더 많은 쪽(tgt) 그대로: 가운데로 잡으면 도로 밖이 될 수 있음
+        for k in ("on", "off", "n"):
             tgt[k] += c[k]
     clusters = merged
+
+    # 3단계: 작은 길 정류장 빼기 (web/roads.js 도로망 기준)
+    near_road = road_distance_fn()
+    for c in clusters:
+        c["pt"] = (c["sx"] / c["w"], c["sy"] / c["w"])  # 합친 뒤 실제 위치
+    if near_road:
+        before = len(clusters)
+        removed_on = sum(c["on"] for c in clusters if near_road(*c["pt"]) > ROAD_M)
+        clusters = [c for c in clusters if near_road(*c["pt"]) <= ROAD_M]
+        print(f"작은 길 정류장 {before - len(clusters)}개 제외 (하루 승차 {round(removed_on)}명)")
 
     stops = []
     for i, c in enumerate(clusters):
