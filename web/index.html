@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>대구 버스 경영 (프로토타입)</title>
+<style>
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; font-family: "Pretendard", "Apple SD Gothic Neo", "Noto Sans KR", sans-serif; background: #1b1f24; color: #e8eaed; }
+  #app { display: grid; grid-template-columns: 1fr 300px; grid-template-rows: 48px 1fr; height: 100%; }
+  #topbar { grid-column: 1 / 3; display: flex; align-items: center; gap: 18px; padding: 0 14px; background: #111418; border-bottom: 1px solid #2b3138; font-size: 14px; }
+  #topbar .stat b { font-size: 16px; }
+  #topbar .spacer { flex: 1; }
+  #map { position: relative; overflow: hidden; }
+  canvas { display: block; width: 100%; height: 100%; cursor: grab; }
+  canvas.drawing { cursor: crosshair; }
+  #side { background: #15191e; border-left: 1px solid #2b3138; overflow-y: auto; padding: 12px; font-size: 13px; }
+  h3 { margin: 14px 0 8px; font-size: 13px; color: #9aa4ae; text-transform: uppercase; letter-spacing: .04em; }
+  h3:first-child { margin-top: 0; }
+  button { background: #2a3139; color: #e8eaed; border: 1px solid #3a434d; border-radius: 6px; padding: 5px 9px; font: inherit; cursor: pointer; }
+  button:hover:not(:disabled) { background: #343d47; }
+  button:disabled { opacity: .45; cursor: default; }
+  button.primary { background: #2563eb; border-color: #2563eb; }
+  button.primary:hover:not(:disabled) { background: #1d4ed8; }
+  button.on { background: #2563eb; border-color: #2563eb; }
+  .route { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 6px; padding: 7px; border-radius: 6px; background: #1e242b; margin-bottom: 6px; cursor: pointer; }
+  .route .sw { margin-top: 3px; }
+  .route .btns { flex-basis: 100%; display: flex; gap: 4px; padding-left: 18px; }
+  .route .sw { width: 12px; height: 12px; border-radius: 3px; flex: none; }
+  .route .nm { flex: 1; }
+  .route .meta { color: #9aa4ae; font-size: 12px; }
+  .route button { padding: 2px 7px; }
+  .gu { display: flex; align-items: center; justify-content: space-between; padding: 5px 6px; border-radius: 6px; }
+  .gu.open { color: #9aa4ae; }
+  .gu:hover { background: #1e242b; }
+  .buybus { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; margin-bottom: 8px; }
+  .buybus button { padding: 6px 4px; line-height: 1.4; font-size: 12px; }
+  .bus { background: #1e242b; border-radius: 6px; padding: 7px; margin-bottom: 6px; line-height: 1.5; }
+  .bus .btns { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 5px; }
+  .bus .btns button { padding: 2px 7px; font-size: 12px; }
+  #attr { position: absolute; right: 6px; bottom: 4px; font-size: 11px; color: #8b95a1; background: rgba(15,18,22,.7); padding: 1px 6px; border-radius: 4px; }
+  #attr a { color: #a5b4c3; }
+  #info { background: #1e242b; border-radius: 6px; padding: 8px; line-height: 1.6; min-height: 40px; }
+  #hint { position: absolute; left: 50%; top: 12px; transform: translateX(-50%); background: rgba(17,20,24,.92); border: 1px solid #3a434d; padding: 8px 14px; border-radius: 8px; font-size: 13px; display: none; }
+  #tooltip { position: absolute; pointer-events: none; background: rgba(17,20,24,.95); border: 1px solid #3a434d; padding: 6px 9px; border-radius: 6px; font-size: 12px; display: none; white-space: nowrap; }
+  #toast { position: absolute; left: 50%; bottom: 20px; transform: translateX(-50%); background: #b91c1c; padding: 8px 14px; border-radius: 8px; font-size: 13px; display: none; }
+  #modal { position: fixed; inset: 0; background: rgba(0,0,0,.55); display: none; align-items: center; justify-content: center; }
+  #modal .box { background: #1b2026; border: 1px solid #3a434d; border-radius: 10px; padding: 20px 24px; min-width: 320px; }
+  #modal table { width: 100%; border-collapse: collapse; margin: 10px 0 16px; font-size: 14px; }
+  #modal td { padding: 4px 0; }
+  #modal td:last-child { text-align: right; font-variant-numeric: tabular-nums; }
+  .pos { color: #4ade80; } .neg { color: #f87171; }
+  .muted { color: #9aa4ae; }
+  .legend { font-size: 12px; color: #9aa4ae; line-height: 1.6; }
+</style>
+</head>
+<body>
+<div id="app">
+  <div id="topbar">
+    <span class="stat">📅 <b id="day">1일차</b></span>
+    <span class="stat">🕐 <b id="clock">05:00</b></span>
+    <span class="stat">💰 <b id="money">0</b></span>
+    <span class="stat">😊 만족도 <b id="sat">-</b></span>
+    <span class="stat" title="만족도에 따라 매일 변하고, 다음 날 수요에 곱해집니다">⭐ 평판 <b id="rep">100%</b></span>
+    <span class="stat">🧍 수요 충족 <b id="cover">-</b></span>
+    <span class="stat muted" id="todayStat"></span>
+    <span class="spacer"></span>
+    <button id="sp0" title="일시정지 (Space)">⏸</button>
+    <button id="sp1" class="on">1x</button>
+    <button id="sp2">3x</button>
+    <button id="sp3">8x</button>
+  </div>
+  <div id="map">
+    <canvas id="cv"></canvas>
+    <div id="hint"></div>
+    <div id="tooltip"></div>
+    <div id="toast"></div>
+    <div id="attr">도로 © <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a> 기여자</div>
+  </div>
+  <div id="side">
+    <h3>노선</h3>
+    <div id="routes"></div>
+    <button id="newRoute" class="primary" style="width:100%">＋ 새 노선 만들기</button>
+    <h3>선택 정보</h3>
+    <div id="info" class="muted">정류장이나 지역을 클릭하세요.</div>
+    <h3>차고지</h3>
+    <div id="buyBus" class="buybus"></div>
+    <div id="depot"></div>
+    <h3>지역 개방</h3>
+    <div id="gus"></div>
+    <h3>도움말</h3>
+    <div class="legend">
+      · 드래그: 지도 이동 / 휠: 확대·축소<br>
+      · 새 노선 → 정류장을 순서대로 클릭 → Enter(완료)<br>
+      &nbsp;&nbsp;첫 정류장을 다시 클릭하면 순환 노선<br>
+      &nbsp;&nbsp;Backspace: 마지막 정류장 취소 / Esc: 취소<br>
+      · ✏️ 노선 수정: 새 정류장 클릭 → 추가, 노선 정류장 클릭 → 빼기, Enter 적용<br>
+      · 속이 빈 원 = 미보유 정류장 (클릭해서 구입 후 노선에 사용)<br>
+      · 버스 구입 → 차고지 → 노선 선택 → 배차<br>
+      · 🚐 마을 20~30명 · 🚌 시내 35~45명 · 🚍 고속 50~60명 (빠름)<br>
+      · 업그레이드·매각은 차고지에서만 (Lv1→3)<br>
+      · 운영비는 운행 중인 버스만 냅니다<br>
+      · 도로 굵기 = 차선 수 (주황 고속도로 · 밝을수록 큰 길)<br>
+      · 정류장 크기 = 실제 하루 평균 승차 인원<br>
+      · 빨간 숫자 = 기다리는 승객<br>
+      · 승객은 1회까지 환승합니다 (환승 무료)<br>
+      · 배차가 잦을수록 승객이 늘고, 오래 기다리면 떠납니다<br>
+      · 만족도가 높으면 평판이 올라 다음 날 수요가 늘어납니다<br>
+      · 승객 목적지는 노선이 닿는 곳으로만 정해집니다<br>
+      · 적자여도 만족도 60% 이상이면 준공영제 보조금(적자의 50%)
+    </div>
+  </div>
+</div>
+<div id="modal"><div class="box" id="modalBox"></div></div>
+<script src="data.js"></script>
+<script src="roads.js"></script>
+<script src="game.js"></script>
+</body>
+</html>

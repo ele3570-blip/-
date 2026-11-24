@@ -1,0 +1,5 @@
+# 스크립트로 다시 만들 수 있는 큰 중간 파일
+data/ridership_long.csv
+*.zip
+*.osm.pbf
+__pycache__/
