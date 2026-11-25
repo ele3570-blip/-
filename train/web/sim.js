@@ -49,9 +49,24 @@ const CFG = {
   repStart: 1.0, repMin: 0.6, repMax: 1.4, repSpeed: 0.35,
   psoMinSat: 60, psoRatio: 0.5,    // 공익서비스 보상: 적자라도 만족도가 높으면 적자의 50%
   dayStartMin: 5 * 60, dayEndMin: 24 * 60,
-  unlockCost: { gyeongbuk_e: 12_000_000, gyeongbuk_n: 8_000_000, busan: 25_000_000, gyeongnam: 10_000_000,
-                chungcheong: 80_000_000, chungbuk: 40_000_000, capital: 250_000_000, gangwon: 50_000_000,
-                jeonbuk: 60_000_000, jeonnam: 80_000_000 },
+  // 지역을 연 뒤에도 쓰려는 선로 구간과 역을 따로 사야 함
+  unlockCost: { gyeongbuk_e: 8_000_000, gyeongbuk_n: 5_000_000, busan: 15_000_000, gyeongnam: 8_000_000,
+                chungcheong: 40_000_000, chungbuk: 20_000_000, capital: 120_000_000, gangwon: 30_000_000,
+                jeonbuk: 30_000_000, jeonnam: 40_000_000 },
+  // 선로 구간(노선 × 지역) 가격 = km × 단가. 개량을 마친 노선이면 개량비도 함께
+  secPerKm: { conv: 60_000, hs: 150_000 }, secMin: 500_000,
+  // 역 가격 = 기본 + 실제 하루 승차 × 단가 (10만원 단위)
+  stationBase: 300_000, stationPerRider: 500,
+  // 환승: 갈아타는 데 걸리는 시간(분)과 수요 배율
+  transferMin: 10, transferQuality: 0.8, maxTransferOpts: 3,
+  // 건설 중·계획 노선(추후 업데이트 예정)
+  future: [
+    { name: '충청권 광역철도 1단계', where: '계룡–대전–신탄진', state: '공사 중' },
+    { name: '부전–마산 복선전철', where: '부산 부전–창원 마산', state: '공사 중' },
+    { name: '남부내륙철도', where: '김천–진주–거제', state: '공사 중' },
+    { name: '대구산업선', where: '서대구–대구국가산단', state: '공사 중' },
+    { name: '광주–나주 광역철도', where: '광주–나주', state: '계획' },
+  ],
   starter: { kind: 'metro', name: '대경선', stops: ['구미', '왜관', '서대구', '대구', '동대구', '경산'] },
   starterDepot: ['general'],
 };
@@ -79,17 +94,33 @@ for (const l of lines) {
   }
   l.totalKm = l.km.reduce((a, b) => a + b, 0);
 }
+// 선로 구간 = 노선 × 지역. 지역 경계를 넘는 엣지는 양쪽 구간에 함께 속하고, 둘 다 사야 쓸 수 있음
+const sections = [], secById = new Map();
+for (const l of lines) {
+  l.sections = [];
+  for (const e of l.edges) {
+    const regs = [...new Set([stations[e.a].region, stations[e.b].region])];
+    e.secs = regs.map(rg => {
+      const id = `${l.id}@${rg}`;
+      let sec = secById.get(id);
+      if (!sec) { sec = { id, line: l, region: rg, edges: [], km: 0 }; secById.set(id, sec); sections.push(sec); l.sections.push(sec); }
+      sec.edges.push(e); sec.km += e.km / regs.length;
+      return sec;
+    });
+  }
+}
 
 // ───────────────────────── 상태 ─────────────────────────
 const G = {
   money: CFG.startMoney, day: 1, t: CFG.dayStartMin, speed: 3, paused: false,
   unlocked: new Set([CFG.startRegion]),
+  ownedSecs: new Set(), ownedSt: new Set(), // 산 선로 구간, 산 역
   lineUp: {},            // lineId → { elec, dbl, speed(+km/h) }
   routes: [], trains: [], depot: [], nextRouteNo: 1, nextTrainId: 1,
   waiting: new Map(),    // stationId → [passenger]
   today: null, rep: CFG.repStart, history: [],
 };
-function newToday() { return { pax: 0, revenue: 0, cost: 0, potential: 0, spawned: 0, satSum: 0, satN: 0, gaveUp: 0, leftBehind: 0, trainKm: 0, bought: 0 }; }
+function newToday() { return { pax: 0, transfers: 0, revenue: 0, cost: 0, potential: 0, spawned: 0, satSum: 0, satN: 0, gaveUp: 0, leftBehind: 0, trainKm: 0, bought: 0 }; }
 G.today = newToday();
 
 const isOpen = s => G.unlocked.has(s.region);
@@ -97,6 +128,8 @@ const lineElec = l => l.elec || !!G.lineUp[l.id]?.elec;
 const lineDbl = l => l.dbl || !!G.lineUp[l.id]?.dbl;
 const lineVmax = l => l.vmax + (G.lineUp[l.id]?.speed || 0);
 const edgeOpen = e => isOpen(stations[e.a]) && isOpen(stations[e.b]);
+const edgeOwned = e => e.secs.every(sc => G.ownedSecs.has(sc.id));
+const stOwned = s => G.ownedSt.has(typeof s === 'number' ? s : s.id);
 function edgeCap(e) { return e.line.kind === 'hs' ? CFG.capHs : lineDbl(e.line) ? CFG.capDouble : CFG.capSingle; }
 
 const kindOf = t => CFG.kinds[t.kind];
@@ -111,7 +144,8 @@ function edgeAllowed(e, kind, lvl = 0) {
 
 // ───────────────────────── 경로 찾기 ─────────────────────────
 // 열차 종류가 다닐 수 있는 선로로 가장 빠른 길. 반환: { nodes:[역…], edges:[엣지…], km }
-function findPath(from, to, kind) {
+// any = 아직 안 산 구간도 지나감(살 구간을 알려 줄 때)
+function findPath(from, to, kind, any = false) {
   if (from === to) return null;
   const v = CFG.kinds[kind].levels[CFG.kinds[kind].levels.length - 1].vmax;
   const dist = new Map([[from, 0]]), prev = new Map(), done = new Set();
@@ -122,7 +156,7 @@ function findPath(from, to, kind) {
     if (done.has(u)) continue; done.add(u);
     if (u === to) break;
     for (const e of adj[u]) {
-      if (!edgeOpen(e) || !edgeAllowed(e, kind)) continue;
+      if (!edgeOpen(e) || !edgeAllowed(e, kind) || (!any && !edgeOwned(e))) continue;
       const w = e.a === u ? e.b : e.a;
       const nd = d + e.km / Math.min(v, lineVmax(e.line)) + 0.02; // 역을 지날 때 작은 벌점: 같은 시간이면 역이 적은 길
       if (nd < (dist.get(w) ?? Infinity)) { dist.set(w, nd); prev.set(w, e); heap.push([nd, w]); }
@@ -149,6 +183,7 @@ function buildLegs(kind, stops) {
   return legs;
 }
 function addRoute(kind, stops, name) {
+  if (stops.some(id => !stOwned(id))) return null;
   const legs = buildLegs(kind, stops);
   if (!legs) return null;
   const used = new Set(G.routes.map(r => r.color));
@@ -161,7 +196,7 @@ function addRoute(kind, stops, name) {
 function routeTitle(r) { return r.name || `${stations[r.stops[0]].name}–${stations[r.stops[r.stops.length - 1]].name}`; }
 function routeKm(r) { return r.legs.reduce((a, l) => a + l.km, 0); }
 function routeHasNonElec(r) { return r.legs.some(l => l.edges.some(e => !lineElec(e.line))); }
-function routeOpen(r) { return r.legs.every(l => l.edges.every(edgeOpen)); }
+function routeOpen(r) { return r.legs.every(l => l.edges.every(e => edgeOpen(e) && edgeOwned(e))); }
 const routeTrains = r => G.trains.filter(t => t.route === r);
 
 // 다리(leg) 소요 시간(분): 구간별 속도 = min(열차, 선로) ÷ 혼잡 + 가감속 손실
@@ -243,37 +278,72 @@ function rebuildNetwork() {
     r.cumKm = [0]; for (const l of r.legs) r.cumKm.push(r.cumKm[r.cumKm.length - 1] + l.km);
     r.active = routeTrains(r).length > 0 && routeOpen(r);
     if (!r.active) continue;
+    // 역 i → j 시간 = |cumMin[j] - cumMin[i]| - 정차시간 (참고 열차 기준)
+    const tier = refTier(r);
+    r.cumMin = [0]; r.legs.forEach((l, k) => r.cumMin.push(r.cumMin[k] + legMinutes(l, tier) + CFG.dwellBase));
+    r.hw = headway(r);
     for (const id of r.stops) { if (!servedBy.has(id)) servedBy.set(id, []); servedBy.get(id).push(r); }
   }
+  const ride = (r, i, j) => Math.abs(r.cumMin[j] - r.cumMin[i]) - CFG.dwellBase;
+  const kmOf = (r, i, j) => Math.abs(r.cumKm[j] - r.cumKm[i]);
   for (const [oid, rs] of servedBy) {
     const o = stations[oid];
-    const best = new Map(); // d → { min, invH }
+    // 바로 가는 곳: d → { min, km, invH, opts:[{r}] }
+    const best = new Map();
     for (const r of rs) {
-      const i = r.idxOf.get(oid), hw = headway(r);
+      const i = r.idxOf.get(oid);
       r.stops.forEach((did, j) => {
         if (j === i) return;
-        const m = rideMinutes(r, i, j);
-        const b = best.get(did) || { min: Infinity, invH: 0, km: rideKm(r, i, j) };
-        b.min = Math.min(b.min, m); b.invH += 1 / hw;
+        const b = best.get(did) || { min: Infinity, invH: 0, km: kmOf(r, i, j), opts: [] };
+        b.min = Math.min(b.min, ride(r, i, j)); b.invH += 1 / r.hw; b.opts.push({ r });
         best.set(did, b);
       });
     }
+    // 한 번 갈아타서 가는 곳: o →(r)→ x →(r2)→ d. 바로 가는 노선이 없는 목적지만
+    const via = new Map();
+    for (const r of rs) {
+      const i = r.idxOf.get(oid);
+      r.stops.forEach((x, j) => {
+        if (j === i) return;
+        const t1 = ride(r, i, j), km1 = kmOf(r, i, j);
+        for (const r2 of servedBy.get(x)) {
+          if (r2 === r) continue;
+          const k = r2.idxOf.get(x), wait2 = CFG.transferMin + Math.min(r2.hw, 120) / 2;
+          r2.stops.forEach((did, l) => {
+            if (l === k || did === oid || best.has(did)) return;
+            const tm = t1 + wait2 + ride(r2, k, l);
+            const b = via.get(did);
+            if (!b || tm < b.min) {
+              const keep = b ? b.opts.filter(op => op.t < tm * 1.15) : [];
+              via.set(did, { min: tm, km: km1 + kmOf(r2, k, l), invH: 1 / r.hw, transfer: true,
+                opts: [{ r, x, r2, t: tm }, ...keep].slice(0, CFG.maxTransferOpts) });
+            } else if (tm < b.min * 1.15 && b.opts.length < CFG.maxTransferOpts && !b.opts.some(op => op.r === r && op.r2 === r2)) {
+              b.opts.push({ r, x, r2, t: tm });
+            }
+          });
+        }
+      });
+    }
+    for (const [d, b] of via) best.set(d, b);
     const W = destWeights(o), list = [], cum = []; let acc = 0;
     for (const [did, b] of best) {
       const w = W.get(did); if (!w) continue;
-      acc += w * quality(b.min, b.km, 1 / b.invH);
+      acc += w * quality(b.min, b.km, 1 / b.invH) * (b.transfer ? CFG.transferQuality : 1);
       list.push(did); cum.push(acc);
     }
     const tot = weightTotal(o);
     destTable.set(oid, { list, cum, total: acc, served: tot ? acc / tot : 0, best });
   }
-  // 기다리는 승객: 더는 갈 수 없는 사람은 돌려보냄
-  for (const [sid, q] of G.waiting) G.waiting.set(sid, q.filter(p => canRide(sid, p.dest)));
+  // 기다리는 승객: 바뀐 노선으로 다시 계획, 갈 수 없으면 돌려보냄
+  for (const [sid, q] of G.waiting) {
+    G.waiting.set(sid, q.filter(p => {
+      if (p.fixed && G.routes.includes(p.fixed) && p.fixed.active && p.fixed.idxOf.has(sid) && p.fixed.idxOf.has(p.dest)) { p.opts = [{ r: p.fixed }]; return true; }
+      p.fixed = null; p.opts = planFrom(sid, p.dest); return p.opts.length > 0;
+    }));
+  }
 }
-function canRide(sid, dest) {
-  for (const r of servedBy.get(sid) || []) if (r.idxOf.has(dest)) return true;
-  return false;
-}
+// 출발역에서 목적지까지 방법: [{ r, x?, r2? }] (x = 갈아타는 역)
+function planFrom(sid, dest) { return destTable.get(sid)?.best.get(dest)?.opts || []; }
 
 // ───────────────────────── 시뮬레이션 ─────────────────────────
 function hourShare(t) { const h = Math.floor(t / 60) - HOUR0; return (CFG.hourly[Math.max(0, Math.min(CFG.hourly.length - 1, h))] || 0) / hourSum; }
@@ -298,7 +368,7 @@ function spawn(dt) {
       const dest = T.list[lo];
       G.today.spawned++;
       if (!G.waiting.has(s.id)) G.waiting.set(s.id, []);
-      G.waiting.get(s.id).push({ dest, start: G.t, patience: patience() });
+      G.waiting.get(s.id).push({ dest, opts: T.best.get(dest).opts, start: G.t, since: G.t, patience: patience() });
     }
     spawnAcc.set(s.id, a);
   }
@@ -321,23 +391,42 @@ function arrive(t) {
   const r = t.route, sid = r.stops[t.i], tier = tierOf(t);
   let moved = 0;
   const stay = [];
-  for (const p of t.pax) { if (p.j === t.i) { moved++; G.today.pax++; r.paxToday = (r.paxToday || 0) + 1; } else stay.push(p); }
+  for (const p of t.pax) {
+    if (p.j !== t.i) { stay.push(p); continue; }
+    moved++;
+    if (p.next) {
+      // 갈아타기: 다음 노선을 기다림. 그 노선이 없어졌으면 다시 계획
+      const n = p.next;
+      const ok = G.routes.includes(n) && n.active && n.idxOf.has(sid) && n.idxOf.has(p.dest);
+      const opts = ok ? [{ r: n }] : planFrom(sid, p.dest).filter(o => !o.x);
+      if (!opts.length) { G.today.gaveUp++; continue; }
+      G.today.transfers++;
+      if (!G.waiting.has(sid)) G.waiting.set(sid, []);
+      G.waiting.get(sid).push({ dest: p.dest, opts, fixed: ok ? n : null, start: p.start, since: G.t, patience: patience(), paid: true, transfer: true });
+    } else { G.today.pax++; r.paxToday = (r.paxToday || 0) + 1; }
+  }
   t.pax = stay;
   const { dir } = nextIdx(t);
   const q = G.waiting.get(sid);
   if (q && q.length) {
     const left = [];
     for (const p of q) {
-      const j = r.idxOf.get(p.dest);
-      if (j === undefined || (j - t.i) * dir <= 0) { left.push(p); continue; }
+      // 이 열차로 갈 수 있는 방법: 같은 노선이고, 내릴 역(갈아탈 역 또는 목적지)이 가는 방향에 있음
+      let opt = null, j;
+      for (const o of p.opts) {
+        if (o.r !== r) continue;
+        const jj = r.idxOf.get(o.x ?? p.dest);
+        if (jj !== undefined && (jj - t.i) * dir > 0) { opt = o; j = jj; break; }
+      }
+      if (!opt) { left.push(p); continue; }
       if (t.pax.length >= tier.cap) {
         if (!p.leftBehind) { p.leftBehind = true; G.today.leftBehind++; r.leftToday = (r.leftToday || 0) + 1; }
         left.push(p); continue;
       }
       const fare = fareFor(tier, rideKm(r, t.i, j));
       G.money += fare; G.today.revenue += fare; r.revToday = (r.revToday || 0) + fare;
-      recordSat(G.t - p.start, tier.comfort);
-      t.pax.push({ dest: p.dest, j });
+      if (!p.paid) { p.paid = true; recordSat(G.t - p.start, tier.comfort); }
+      t.pax.push({ dest: p.dest, j, next: opt.x != null ? opt.r2 : null, start: p.start });
       moved++;
     }
     G.waiting.set(sid, left);
@@ -386,7 +475,7 @@ function stepTrains(dt) {
 function giveUps() {
   for (const [sid, q] of G.waiting) {
     if (!q.length) continue;
-    const keep = q.filter(p => G.t - p.start <= p.patience);
+    const keep = q.filter(p => G.t - p.since <= p.patience);
     const n = q.length - keep.length;
     if (n) { G.today.gaveUp += n; G.today.satN += n; }
     G.waiting.set(sid, keep);
@@ -479,10 +568,57 @@ function deleteRoute(r) {
 }
 // 정차역 바꾸기: 새 정차역 목록으로 경로 다시 계산
 function setRouteStops(r, stops) {
+  if (stops.some(id => !stOwned(id))) return { err: '사지 않은 역이 있습니다' };
   const legs = buildLegs(r.kind, stops);
   if (!legs) return { err: '이을 수 없는 역이 있습니다' };
   r.stops = stops; r.legs = legs;
   for (const t of routeTrains(r)) { t.i = Math.min(t.i, stops.length - 1); t.dir = t.i === stops.length - 1 ? -1 : t.dir; t.legT = 0; t.legDur = null; t.pax = []; }
+  rebuildNetwork();
+  return {};
+}
+
+// 역·선로 구간 구입
+const r100k = x => Math.round(x / 100_000) * 100_000;
+function stationPrice(s) { return r100k(CFG.stationBase + s.on * CFG.stationPerRider); }
+function buyStation(s, free = false) {
+  if (stOwned(s)) return { err: '이미 산 역입니다' };
+  if (!isOpen(s)) return { err: '아직 열지 않은 지역의 역입니다' };
+  const c = free ? 0 : stationPrice(s);
+  if (G.money < c) return { err: `돈이 부족합니다 (${s.name}역 ${Math.round(c / 1e4).toLocaleString()}만원)` };
+  G.money -= c; G.today.bought += c; G.ownedSt.add(s.id);
+  return {};
+}
+function sectionPrice(sec) {
+  const l = sec.line, u = G.lineUp[l.id] || {};
+  let per = CFG.secPerKm[l.kind];
+  if (u.elec && !l.elec) per += CFG.elecPerKm;           // 이미 개량한 노선이면 이 구간 개량비도
+  if (u.dbl && !l.dbl) per += CFG.dblPerKm;
+  if (u.speed) per += u.speed / CFG.speedStep * CFG.speedPerKm;
+  return Math.max(CFG.secMin, r100k(sec.km * per));
+}
+const secOwned = sec => G.ownedSecs.has(sec.id);
+function buySection(sec, free = false) {
+  if (secOwned(sec)) return { err: '이미 산 구간입니다' };
+  if (!G.unlocked.has(sec.region)) return { err: '아직 열지 않은 지역입니다' };
+  const c = free ? 0 : sectionPrice(sec);
+  if (G.money < c) return { err: '돈이 부족합니다' };
+  G.money -= c; G.today.bought += c; G.ownedSecs.add(sec.id);
+  for (const r of G.routes) r.legs = buildLegs(r.kind, r.stops) || r.legs;
+  rebuildNetwork();
+  return {};
+}
+// 경로에서 아직 안 산 구간
+function missingSections(path) {
+  const need = new Map();
+  for (const e of path.edges) for (const sc of e.secs) if (!secOwned(sc)) need.set(sc.id, sc);
+  return [...need.values()];
+}
+function buySections(list) {
+  const total = list.reduce((a, sc) => a + sectionPrice(sc), 0);
+  if (list.some(sc => !G.unlocked.has(sc.region))) return { err: '아직 열지 않은 지역을 지나야 합니다' };
+  if (G.money < total) return { err: '돈이 부족합니다' };
+  for (const sc of list) { G.money -= sectionPrice(sc); G.today.bought += sectionPrice(sc); G.ownedSecs.add(sc.id); }
+  for (const r of G.routes) r.legs = buildLegs(r.kind, r.stops) || r.legs;
   rebuildNetwork();
   return {};
 }
@@ -507,8 +643,9 @@ function regionReachable(id) {
 
 // 선로 개량
 function openKm(l) { let s = 0; for (const e of l.edges) if (edgeOpen(e)) s += e.km; return s; }
+function ownedKm(l) { let s = 0; for (const sc of l.sections) if (secOwned(sc)) s += sc.km; return s; }
 function upgradeCost(l, what) {
-  const km = openKm(l);
+  const km = ownedKm(l);
   if (what === 'elec') return lineElec(l) ? null : Math.round(km * CFG.elecPerKm / 100_000) * 100_000;
   if (what === 'dbl') return l.kind === 'hs' || lineDbl(l) ? null : Math.round(km * CFG.dblPerKm / 100_000) * 100_000;
   if (what === 'speed') return l.kind === 'hs' || lineVmax(l) + CFG.speedStep > CFG.speedMax ? null : Math.round(km * CFG.speedPerKm / 100_000) * 100_000;
@@ -517,7 +654,7 @@ function upgradeCost(l, what) {
 function upgradeLine(l, what) {
   const c = upgradeCost(l, what);
   if (c == null) return { err: '할 수 없는 개량입니다' };
-  if (!openKm(l)) return { err: '열린 구간이 없습니다' };
+  if (!ownedKm(l)) return { err: '산 구간이 없습니다' };
   if (G.money < c) return { err: '돈이 부족합니다' };
   G.money -= c;
   const u = G.lineUp[l.id] = G.lineUp[l.id] || {};
@@ -528,10 +665,10 @@ function upgradeLine(l, what) {
 }
 
 // ───────────────────────── 저장 ─────────────────────────
-const SAVE_KEY = 'korea-rail-save-v1';
+const SAVE_KEY = 'korea-rail-save-v2'; // v2: 역·선로 구간 구입, 환승
 function serialize() {
   return JSON.stringify({
-    money: G.money, day: G.day, rep: G.rep, unlocked: [...G.unlocked], lineUp: G.lineUp,
+    money: G.money, day: G.day, rep: G.rep, unlocked: [...G.unlocked], lineUp: G.lineUp, ownedSecs: [...G.ownedSecs], ownedSt: [...G.ownedSt],
     nextRouteNo: G.nextRouteNo, nextTrainId: G.nextTrainId, history: G.history,
     routes: G.routes.map(r => ({ no: r.no, kind: r.kind, color: r.color, stops: r.stops, name: r.name })),
     trains: G.trains.map(t => ({ id: t.id, kind: t.kind, lvl: t.lvl, route: t.route.no, i: t.i, dir: t.dir })),
@@ -541,6 +678,7 @@ function serialize() {
 function deserialize(s) {
   const o = JSON.parse(s);
   Object.assign(G, { money: o.money, day: o.day, rep: o.rep, unlocked: new Set(o.unlocked), lineUp: o.lineUp || {},
+    ownedSecs: new Set(o.ownedSecs || []), ownedSt: new Set(o.ownedSt || []),
     nextRouteNo: o.nextRouteNo, nextTrainId: o.nextTrainId, history: o.history || [], t: CFG.dayStartMin, today: newToday(), waiting: new Map() });
   G.routes = [];
   for (const r of o.routes) { const legs = buildLegs(r.kind, r.stops); if (legs) G.routes.push({ ...r, legs }); }
@@ -554,15 +692,19 @@ function deserialize(s) {
   rebuildNetwork();
 }
 function setupNewGame() {
-  const st = CFG.starter;
-  const r = addRoute(st.kind, st.stops.map(n => byName.get(n).id), st.name);
+  const st = CFG.starter, ids = st.stops.map(n => byName.get(n).id);
+  // 시작 노선이 지나는 역과 구간은 처음부터 가지고 시작
+  for (const id of ids) buyStation(stations[id], true);
+  for (let k = 0; k + 1 < ids.length; k++) for (const sc of missingSections(findPath(ids[k], ids[k + 1], st.kind, true))) G.ownedSecs.add(sc.id);
+  const r = addRoute(st.kind, ids, st.name);
   dispatch(buyTrain(st.kind, true).t, r);
   for (const k of CFG.starterDepot) buyTrain(k, true);
 }
 
-root.SIM = { CFG, D, G, stations, byName, lines, edges, adj, regionName, toKm, distKm, isOpen, lineElec, lineDbl, lineVmax, edgeOpen, edgeCap,
+root.SIM = { CFG, D, G, stations, byName, lines, edges, adj, sections, secById, edgeOwned, stOwned, secOwned, stationPrice, buyStation,
+  sectionPrice, buySection, missingSections, buySections, ownedKm, regionName, toKm, distKm, isOpen, lineElec, lineDbl, lineVmax, edgeOpen, edgeCap,
   kindOf, tierOf, needsElec, edgeAllowed, findPath, buildLegs, addRoute, routeTitle, routeKm, routeHasNonElec, routeOpen, routeTrains,
-  legMinutes, cycleMinutes, headway, rideMinutes, rideKm, rebuildNetwork, canRide, hourShare, peakAt, tick, satPct, closeDay, startNextDay,
+  legMinutes, cycleMinutes, headway, rideMinutes, rideKm, rebuildNetwork, planFrom, hourShare, peakAt, tick, satPct, closeDay, startNextDay,
   trainValue, sellValue, buyTrain, upgradeTrain, sellTrain, canDispatch, dispatch, recall, deleteRoute, setRouteStops, unlockRegion,
   regionReachable, openKm, upgradeCost, upgradeLine, fareFor, nextIdx, SAVE_KEY, serialize, deserialize, setupNewGame,
   get edgeLoad() { return edgeLoad; }, get edgeLoadFactor() { return edgeLoadFactor; }, get servedBy() { return servedBy; }, get destTable() { return destTable; },

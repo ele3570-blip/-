@@ -113,12 +113,12 @@ function draw() {
   // 선로
   const load = S.edgeLoad;
   for (const e of edges) {
-    const open = S.edgeOpen(e), hs = e.line.kind === 'hs', el = S.lineElec(e.line), dbl = S.lineDbl(e.line);
+    const open = S.edgeOpen(e), own = S.edgeOwned(e), hs = e.line.kind === 'hs', el = S.lineElec(e.line), dbl = S.lineDbl(e.line);
     const [x1, y1, x2, y2] = edgeScreen(e, 0);
-    ctx.globalAlpha = open ? 1 : 0.35;
+    ctx.globalAlpha = !open ? 0.3 : own ? 1 : 0.55;
     ctx.setLineDash(el ? [] : [5, 4]);
     ctx.strokeStyle = hs ? '#1f2937' : el ? '#6b7280' : '#9ca3af';
-    ctx.lineWidth = hs ? 3.2 : dbl ? 2.4 : 1.6;
+    ctx.lineWidth = (hs ? 3.2 : dbl ? 2.4 : 1.6) * (own ? 1 : 0.6);
     ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke();
     const l = load.get(e.id) || 0, cap = S.edgeCap(e);
     if (open && l > cap * 0.8) {
@@ -146,8 +146,10 @@ function draw() {
     ctx.strokeStyle = '#111827'; ctx.lineWidth = 3; ctx.setLineDash([7, 5]);
     for (const leg of plan.legs) for (const e of leg.edges) { const [x1, y1, x2, y2] = edgeScreen(e, 0); ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke(); }
     if (drawing && hoverStation && drawing.stops.length) {
-      const P = S.findPath(drawing.stops[drawing.stops.length - 1], hoverStation.id, drawing.kind);
-      ctx.strokeStyle = P ? '#2563eb' : '#dc2626';
+      const a = drawing.stops[drawing.stops.length - 1];
+      let P = S.findPath(a, hoverStation.id, drawing.kind);
+      ctx.strokeStyle = '#2563eb';
+      if (!P) { P = S.findPath(a, hoverStation.id, drawing.kind, true); ctx.strokeStyle = '#f59e0b'; }
       if (P) for (const e of P.edges) { const [x1, y1, x2, y2] = edgeScreen(e, 0); ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke(); }
     }
     ctx.setLineDash([]);
@@ -161,13 +163,14 @@ function draw() {
     const open = S.isOpen(s), X = sx(s.x), Y = sy(s.y);
     if (X < -40 || Y < -40 || X > W + 40 || Y > H + 40) continue;
     const rad = stationR(s);
-    const served = S.servedBy.has(s.id);
+    const served = S.servedBy.has(s.id), own = S.stOwned(s);
     ctx.beginPath(); ctx.arc(X, Y, rad, 0, Math.PI * 2);
-    ctx.fillStyle = !open ? '#e5e7eb' : stopSet.has(s.id) ? '#fde68a' : '#ffffff';
+    ctx.fillStyle = !open ? '#e5e7eb' : stopSet.has(s.id) ? '#fde68a' : own ? '#ffffff' : '#f1f5f9';
     ctx.fill();
+    ctx.setLineDash(open && !own ? [2, 2] : []);
     ctx.lineWidth = s === hoverStation || selected?.s === s ? 3 : served ? 2 : 1.3;
     ctx.strokeStyle = !open ? '#9ca3af' : s === hoverStation ? '#2563eb' : '#1f2937';
-    ctx.stroke();
+    ctx.stroke(); ctx.setLineDash([]);
     if (showAll || s.on > 6000 / Math.max(0.4, cam.z) || s === hoverStation || stopSet.has(s.id)) labels.push({ s, X, Y, rad, open });
   }
   ctx.font = '600 12px "Pretendard","Apple SD Gothic Neo","Noto Sans KR",sans-serif';
@@ -224,18 +227,20 @@ function stationHtml(s) {
   const T = S.destTable.get(s.id);
   let h = `<div><b style="font-size:15px">${esc(s.name)}역</b> <span class="tag gray">${esc(S.regionName[s.region])}</span> ${open ? '' : '<span class="tag warn">미개방</span>'}</div>
     <div class="muted">${esc(s.si)} · 실제 하루 승차 ${fmt(s.on)}명 · 하차 ${fmt(s.off)}명${s.ktx ? ` · KTX ${Math.round(s.ktx * 100)}%` : ''}</div>`;
+  if (open && !S.stOwned(s)) h += `<div style="margin-top:6px"><button class="primary" data-buyst="${s.id}" ${G.money < S.stationPrice(s) ? 'disabled' : ''}>🏷 역 사기 ${won(S.stationPrice(s))}</button> <span class="muted">사야 열차를 세울 수 있습니다</span></div>`;
   if (open) {
     h += `<div style="margin-top:6px">🧍 기다리는 승객 <b>${fmt(q.length)}</b>명 · 지나는 노선 ${rs.length}개${T ? ` · 이어진 수요 ${Math.round(T.served * 100)}%` : ''}</div>`;
     if (q.length) {
       const cnt = new Map(); for (const p of q) cnt.set(p.dest, (cnt.get(p.dest) || 0) + 1);
-      const top = [...cnt].sort((a, b) => b[1] - a[1]).slice(0, 6);
+      const top = [...cnt].sort((a, b) => b[1] - a[1]).slice(0, 6), nx = q.filter(p => p.transfer).length;
+      if (nx) h += `<div class="muted">그중 갈아타는 승객 ${fmt(nx)}명</div>`;
       h += `<div class="wbox"><div class="wsub">기다리는 승객의 목적지</div>${top.map(([d, c]) => `<div class="wrow"><span class="wlab">${esc(stations[d].name)}</span><span class="wbar"><i style="width:${c / top[0][1] * 100}%;background:#6366f1"></i></span><span class="wnum">${c}명</span></div>`).join('')}</div>`;
     }
   }
   const td = topDests(s, 8);
   h += `<div class="wbox"><div class="wsub">이 역 사람들이 가고 싶은 곳 (보라 점선)</div>${td.map(d => {
-    const t = stations[d.id], o = S.isOpen(t), served = T?.best?.has(d.id);
-    return `<div class="wrow"><span class="wlab">${esc(t.name)} ${served ? '<span class="tag ok">연결</span>' : o ? '' : '<span class="tag gray">미개방</span>'}</span><span class="wbar"><i style="width:${d.share / td[0].share * 100}%;background:${served ? '#16a34a' : o ? '#a78bfa' : '#cbd5e1'}"></i></span><span class="wnum">${(d.share * 100).toFixed(1)}%</span></div>`;
+    const t = stations[d.id], o = S.isOpen(t), b = T?.best?.get(d.id), served = !!b;
+    return `<div class="wrow"><span class="wlab">${esc(t.name)} ${b ? (b.transfer ? `<span class="tag ok">환승 ${esc(stations[b.opts[0].x].name)}</span>` : '<span class="tag ok">직통</span>') : o ? '' : '<span class="tag gray">미개방</span>'}</span><span class="wbar"><i style="width:${d.share / td[0].share * 100}%;background:${served ? '#16a34a' : o ? '#a78bfa' : '#cbd5e1'}"></i></span><span class="wnum">${(d.share * 100).toFixed(1)}%</span></div>`;
   }).join('')}</div>`;
   return h;
 }
@@ -287,7 +292,7 @@ function renderInfo() {
 }
 
 // ───────────────────────── 설정창 ─────────────────────────
-const PANELS = { routes: '🛤️ 노선', depot: '🚉 차량기지', regions: '🗺️ 지역 개방', tracks: '🔧 선로 개량', help: '❓ 도움말' };
+const PANELS = { routes: '🛤️ 노선', depot: '🚉 차량기지', regions: '🗺️ 지역 개방', tracks: '🔧 선로', help: '❓ 도움말' };
 let openPanelName = null, panelBeforeMap = null;
 function openPanel(name) {
   openPanelName = name;
@@ -340,22 +345,31 @@ function renderRegions() {
 }
 function renderTracks() {
   const ls = lines.filter(l => S.openKm(l) > 0);
+  ls.sort((a, b) => S.ownedKm(b) - S.ownedKm(a));
   $('tracks').innerHTML = ls.map(l => {
     let maxLoad = 0; for (const e of l.edges) maxLoad = Math.max(maxLoad, (S.edgeLoad.get(e.id) || 0) / S.edgeCap(e));
-    const btn = (what, label) => { const c = S.upgradeCost(l, what); return c == null ? '' : `<button data-lup="${l.id}:${what}" ${G.money < c ? 'disabled' : ''}>${label} ${won(c)}</button>`; };
-    const partial = S.openKm(l) < l.totalKm - 0.5;
-    return `<div class="line"><b>${esc(l.name)}</b> <span class="muted">${fmt(S.openKm(l))}km${partial ? ` / ${fmt(l.totalKm)}km` : ''}</span>
+    const own = S.ownedKm(l) > 0;
+    const btn = (what, label) => { const c = S.upgradeCost(l, what); return !own || c == null ? '' : `<button data-lup="${l.id}:${what}" ${G.money < c ? 'disabled' : ''}>${label} ${won(c)}</button>`; };
+    const secs = l.sections.filter(sc => G.unlocked.has(sc.region)).map(sc => S.secOwned(sc)
+      ? `<span class="tag ok">${esc(S.regionName[sc.region])} ${fmt(sc.km)}km</span>`
+      : `<button data-buysec="${sc.id}" ${G.money < S.sectionPrice(sc) ? 'disabled' : ''}>🏷 ${esc(S.regionName[sc.region])} ${fmt(sc.km)}km ${won(S.sectionPrice(sc))}</button>`).join(' ');
+    return `<div class="line"><b>${esc(l.name)}</b>
       <span class="tag ${l.kind === 'hs' ? '' : 'gray'}">${l.kind === 'hs' ? '고속선' : '일반선'}</span>
       <span class="tag ${S.lineElec(l) ? 'ok' : 'warn'}">${S.lineElec(l) ? '전철화' : '비전철'}</span>
       <span class="tag gray">${l.kind === 'hs' ? '고속 복선' : S.lineDbl(l) ? '복선' : '단선'}</span>
       <span class="tag gray">${S.lineVmax(l)}km/h</span>
-      <div class="muted">가장 붐비는 구간 ${Math.round(maxLoad * 100)}% ${maxLoad > 1 ? '<span class="tag warn">용량 초과 → 감속</span>' : ''}</div>
-      <div class="btns">${btn('elec', '⚡ 전철화')}${btn('dbl', '🛤 복선화')}${btn('speed', '🚀 고속화')}</div></div>`;
-  }).join('');
+      <div class="btns">${secs}</div>
+      ${own ? `<div class="muted">가장 붐비는 구간 ${Math.round(maxLoad * 100)}% ${maxLoad > 1 ? '<span class="tag warn">용량 초과 → 감속</span>' : ''}</div>
+      <div class="btns">${btn('elec', '⚡ 전철화')}${btn('dbl', '🛤 복선화')}${btn('speed', '🚀 고속화')}</div>` : ''}</div>`;
+  }).join('') + `<h3>🚧 건설 중·계획 노선 (추후 업데이트 예정)</h3>` + CFG.future.map(f =>
+    `<div class="line" style="opacity:.75"><b>${esc(f.name)}</b> <span class="tag gray">${esc(f.state)}</span><br><span class="muted">${esc(f.where)}</span></div>`).join('');
 }
 function renderHelp() {
   $('helpText').innerHTML = `
     · 드래그: 지도 이동 / 휠: 확대·축소 / Space: 일시정지<br>
+    · 확장 순서: 🗺️ 지역 열기 → 🔧 선로 구간 사기 → 역 사기 → 노선 만들기<br>
+    &nbsp;&nbsp;노선을 그리다 안 산 역·구간을 누르면 바로 살 수 있습니다<br>
+    · 점선 테두리 역 = 아직 안 산 역 / 흐린 선로 = 아직 안 산 구간<br>
     · 새 노선: 종류 선택 → 정차할 역을 순서대로 클릭 → Enter(완료)<br>
     &nbsp;&nbsp;사이에 있는 역은 통과합니다(급행). Backspace: 마지막 역 취소 / Esc: 취소<br>
     · ✏️ 정차역 수정: 정차역 클릭 → 빼기, 다른 역 클릭 → 넣기, Enter 적용<br>
@@ -367,6 +381,8 @@ function renderHelp() {
     · 역 크기 = 실제 하루 승차 인원(2025, 코레일). 게임 승객 1명 = 실제 ${Math.round(1 / CFG.demandScale)}명<br>
     · 역을 누르면 그 역 사람들이 가고 싶은 곳이 나옵니다. 아직 안 열린 지역으로 가려는 사람이 많으면 지역을 여세요<br>
     · 빠를수록(자동차보다), 자주 다닐수록 승객이 늘고, 오래 기다리면 떠납니다<br>
+    · 승객은 한 번까지 갈아탑니다(예: 대경선 → 동대구 → KTX). 요금은 탄 열차마다 냅니다<br>
+    · 🚧 건설 중인 노선(충청권 광역철도, 부전–마산 등)은 추후 업데이트로 추가됩니다<br>
     · 요금은 거리 비례(일반 ${CFG.kinds.general.levels[0].fare[1]}원/km~, KTX ${CFG.kinds.ktx.levels[0].fare[1]}원/km~). 운행비는 달린 거리만큼, 고정비는 하루 단위<br>
     · 적자여도 만족도 ${CFG.psoMinSat}% 이상이면 공익서비스 보상금(적자의 ${CFG.psoRatio * 100}%)`;
 }
@@ -405,13 +421,32 @@ function startDrawing(kind) {
   cv.classList.add('drawing'); hidePanelForMap(); selected = null; renderInfo();
   setHint(`${kindIcon(kind)} <b>새 ${CFG.kinds[kind].name} 노선</b>: 정차할 역을 순서대로 누르세요 · Enter 완료 · Backspace 되돌리기 · Esc 취소`);
 }
+// 안 산 역이면 살지 묻고 삼. 샀으면 true
+function ensureStation(s) {
+  if (S.stOwned(s)) return true;
+  if (!S.isOpen(s)) { toast('아직 열지 않은 지역의 역입니다'); return false; }
+  const c = S.stationPrice(s);
+  if (!confirm(`${s.name}역은 아직 사지 않았습니다.\n${won(c)}에 사서 정차역으로 넣을까요?`)) return false;
+  return check(S.buyStation(s), `${s.name}역을 샀습니다`);
+}
+// a → b 길: 산 선로로 안 이어지면 필요한 구간을 사겠냐고 물음
+function pathOrBuy(a, b, kind) {
+  let P = S.findPath(a, b, kind);
+  if (P) return P;
+  const Q = S.findPath(a, b, kind, true);
+  if (!Q) { toast(`${CFG.kinds[kind].name}이(가) 다닐 수 있는 선로로 이어지지 않습니다 (열린 지역·전철화 확인)`); return null; }
+  const need = S.missingSections(Q), total = need.reduce((x, sc) => x + S.sectionPrice(sc), 0);
+  if (!confirm(`이 구간 선로를 아직 사지 않았습니다.\n${need.map(sc => `· ${sc.line.name} ${S.regionName[sc.region]} 구간 ${fmt(sc.km)}km  ${won(S.sectionPrice(sc))}`).join('\n')}\n\n모두 ${won(total)}에 살까요?`)) return null;
+  if (!check(S.buySections(need), '선로 구간을 샀습니다')) return null;
+  return S.findPath(a, b, kind);
+}
 function drawClick(s) {
-  if (!S.isOpen(s)) return toast('아직 열지 않은 지역의 역입니다');
   const st = drawing.stops;
   if (st.includes(s.id)) return toast('이미 넣은 역입니다');
+  if (!ensureStation(s)) return;
   if (st.length) {
-    const P = S.findPath(st[st.length - 1], s.id, drawing.kind);
-    if (!P) return toast(`${CFG.kinds[drawing.kind].name}이(가) 다닐 수 있는 선로로 이어지지 않습니다`);
+    const P = pathOrBuy(st[st.length - 1], s.id, drawing.kind);
+    if (!P) return;
     drawing.legs.push(P);
   }
   st.push(s.id);
@@ -440,7 +475,7 @@ function editClick(s) {
     if (st.length <= 2) return toast('정차역은 2개 이상이어야 합니다');
     st.splice(k, 1);
   } else {
-    if (!S.isOpen(s)) return toast('아직 열지 않은 지역의 역입니다');
+    if (!ensureStation(s)) return;
     // 가장 덜 돌아가는 자리에 끼워 넣기
     let best = null;
     for (let i = 0; i <= st.length; i++) {
@@ -450,7 +485,7 @@ function editClick(s) {
       const km = legs.reduce((a, l) => a + l.km, 0);
       if (!best || km < best.km) best = { km, cand };
     }
-    if (!best) return toast('이 역은 노선과 이어지지 않습니다');
+    if (!best) return toast('이 역은 산 선로로 노선과 이어지지 않습니다. 🔧 선로에서 구간을 먼저 사세요');
     st.splice(0, st.length, ...best.cand);
   }
   editing.legs = S.buildLegs(editing.kind, st) || [];
@@ -517,10 +552,11 @@ cv.addEventListener('mousemove', e => {
     let txt;
     if (hoverStation) {
       const s = hoverStation, q = (G.waiting.get(s.id) || []).length;
-      txt = `<b>${esc(s.name)}</b> · 실제 하루 ${fmt(s.on)}명 승차${q ? ` · 대기 ${q}명` : ''}${S.isOpen(s) ? '' : ' · 미개방'}`;
+      txt = `<b>${esc(s.name)}</b> · 실제 하루 ${fmt(s.on)}명 승차${q ? ` · 대기 ${q}명` : ''}${!S.isOpen(s) ? ' · 미개방' : S.stOwned(s) ? '' : ` · 미보유 ${won(S.stationPrice(s))}`}`;
       if (drawing && drawing.stops.length) {
-        const P = S.findPath(drawing.stops[drawing.stops.length - 1], s.id, drawing.kind);
-        txt += P ? ` · +${fmt(P.km)}km` : ' · <span class="neg">연결 안 됨</span>';
+        const a = drawing.stops[drawing.stops.length - 1], P = S.findPath(a, s.id, drawing.kind);
+        const Q = P ? null : S.findPath(a, s.id, drawing.kind, true);
+        txt += P ? ` · +${fmt(P.km)}km` : Q ? ` · <span class="neg">선로 구간 구입 필요 ${won(S.missingSections(Q).reduce((x, sc) => x + S.sectionPrice(sc), 0))}</span>` : ' · <span class="neg">연결 안 됨</span>';
       }
     } else {
       const t = hoverTrain; txt = `${trainLabel(t)} · ${t.pax.length}/${S.tierOf(t).cap}명`;
@@ -575,6 +611,8 @@ document.addEventListener('click', e => {
   else if (d.selroute) { selected = { type: 'route', r: findR(d.selroute) }; renderInfo(); }
   else if (d.unlock) { const id = d.unlock; if (check(S.unlockRegion(id), `${S.regionName[id]}을(를) 열었습니다`)) fitStations(stations.filter(s => s.region === id || G.unlocked.has(s.region))); }
   else if (d.region && !e.target.closest('button')) fitStations(stations.filter(s => s.region === d.region));
+  else if (d.buyst) { const st = stations[+d.buyst]; check(S.buyStation(st), `${st.name}역을 샀습니다`); }
+  else if (d.buysec) { const sc = S.secById.get(d.buysec); check(S.buySection(sc), `${sc.line.name} ${S.regionName[sc.region]} 구간을 샀습니다`); }
   else if (d.lup) { const [id, what] = d.lup.split(':'); check(S.upgradeLine(lines.find(l => l.id === id), what), '공사를 마쳤습니다'); }
 });
 $('depotRoute').addEventListener('change', e => { depotRouteNo = +e.target.value || null; renderDepot(); });
@@ -597,6 +635,7 @@ function endDay() {
     <h2 style="margin:0">${R.day}일차 결산</h2>
     <table>
       <tr><td>수송 승객</td><td>${fmt(R.pax)}명 <span class="muted">(실제 ${fmt(R.pax / CFG.demandScale)}명)</span></td></tr>
+      <tr><td>갈아탄 승객</td><td>${fmt(R.transfers)}명</td></tr>
       <tr><td>기다리다 떠난 승객</td><td>${fmt(R.gaveUp)}명</td></tr>
       <tr><td>만석으로 못 탄 승객</td><td class="${R.leftBehind ? 'neg' : ''}">${fmt(R.leftBehind)}명</td></tr>
       <tr><td>수요 충족률</td><td>${R.cover.toFixed(1)}%</td></tr>
@@ -606,6 +645,7 @@ function endDay() {
       <tr><td>운임 수입</td><td class="pos">+${won(R.revenue)}</td></tr>
       <tr><td>운행비 (${fmt(R.trainKm)}열차km)</td><td class="neg">-${won(R.cost - R.fixed)}</td></tr>
       <tr><td>차량 고정비 (${G.trains.length}대)</td><td class="neg">-${won(R.fixed)}</td></tr>
+      <tr><td>역·선로·열차 구입</td><td class="muted">${won(R.bought)} (투자)</td></tr>
       <tr><td>공익서비스 보상금</td><td class="pos">+${won(R.pso)}</td></tr>
       <tr><td><b>순이익</b></td><td class="${total >= 0 ? 'pos' : 'neg'}"><b>${won(total)}</b></td></tr>
       <tr><td>보유 자금</td><td>${won(G.money)}</td></tr>
@@ -653,7 +693,8 @@ if (!loaded) {
   G.paused = true; setSpeedUI();
   showModal(`<h2 style="margin:0 0 8px">🚄 전국 철도 경영</h2>
     <p style="line-height:1.7">동대구역에서 시작합니다. 대구권에는 <b>대경선</b>(구미–경산 광역열차)이 1대 달리고 있고, 차량기지에 <b>무궁화호</b> 1대가 있습니다.</p>
-    <p style="line-height:1.7">역을 눌러 사람들이 어디로 가고 싶은지 보세요. 대구 사람들은 대부분 서울·부산으로 갑니다. 돈을 모아 이웃 지역을 열고 선로를 따라 노선을 넓히세요.</p>
+    <p style="line-height:1.7">역을 눌러 사람들이 어디로 가고 싶은지 보세요. 대구 사람들은 대부분 서울·부산으로 갑니다.</p>
+    <p style="line-height:1.7">넓히는 순서: 🗺️ <b>지역 열기</b> → 🔧 <b>선로 구간 사기</b> → <b>역 사기</b> → 노선 만들기. 노선을 그리다 안 산 역이나 구간을 누르면 바로 살 수 있습니다. 승객은 한 번까지 갈아탑니다.</p>
     <p class="muted">수요: 한국철도공사 역별 승하차(2025)를 하루 평균으로 나눈 값. 진행은 브라우저에 하루 단위로 저장됩니다.</p>
     <button class="primary" id="startBtn" style="width:100%">시작</button>`);
   $('startBtn').onclick = () => { hideModal(); G.paused = false; setSpeedUI(); save(); };

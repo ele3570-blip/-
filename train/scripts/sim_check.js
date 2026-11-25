@@ -6,6 +6,8 @@ for (const f of ['data.js', 'sim.js']) vm.runInContext(fs.readFileSync(require('
 const S = ctx.SIM;
 S.setupNewGame();
 const scen = process.argv[3] || 'base';
+function ownAll() { for (const sc of S.sections) if (S.G.unlocked.has(sc.region)) S.G.ownedSecs.add(sc.id); for (const s of S.stations) if (S.isOpen(s)) S.G.ownedSt.add(s.id); S.rebuildNetwork(); }
+if (scen !== 'base') ownAll();
 if (scen === 'gen') { // 일반열차 김천-청도 노선
   const r = S.addRoute('general', ['김천','구미','왜관','대구','동대구','경산','청도'].map(n => S.byName.get(n).id));
   S.dispatch(S.G.depot[0], r);
@@ -22,6 +24,9 @@ if (scen === 'more') {
 if (scen === 'busan') {
   S.G.money += 1e9;
   for (const r of ['busan','gyeongnam','gyeongbuk_e']) S.unlockRegion(r);
+  for (const sc of S.sections) if (S.G.unlocked.has(sc.region)) S.G.ownedSecs.add(sc.id);
+  for (const s of S.stations) if (S.isOpen(s)) S.G.ownedSt.add(s.id);
+  S.G.routes.forEach(r => r.legs = S.buildLegs(r.kind, r.stops)); S.rebuildNetwork();
   const m = S.G.routes[0];
   for (let k = 0; k < 2; k++) S.dispatch(S.buyTrain('metro').t, m);
   const id = n => S.byName.get(n).id;
@@ -36,7 +41,7 @@ for (let d = 0; d < days; d++) {
   while (S.G.t < S.CFG.dayEndMin) S.tick(0.25);
   const res = S.closeDay();
   console.log(`day ${res.day}: pax ${res.pax} spawned ${res.spawned} gaveUp ${res.gaveUp} left ${res.leftBehind} pot ${res.potential.toFixed(0)} sat ${res.sat?.toFixed(0)} rev ${Math.round(res.revenue)} cost ${Math.round(res.cost)} money ${Math.round(res.money)} rep ${res.rep.toFixed(2)}`);
-  for (const r of S.G.routes) console.log('   ', S.routeTitle(r), 'pax', r.paxToday, 'rev', r.revToday, 'cost', Math.round(r.costToday), 'cycle', S.cycleMinutes(r).toFixed(0), 'trains', S.routeTrains(r).length);
+  for (const r of S.G.routes) console.log('   ', S.routeTitle(r), 'xfer', res.transfers, 'pax', r.paxToday, 'rev', r.revToday, 'cost', Math.round(r.costToday), 'cycle', S.cycleMinutes(r).toFixed(0), 'trains', S.routeTrains(r).length);
   S.startNextDay();
 }
 const T = S.destTable;
