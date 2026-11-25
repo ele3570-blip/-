@@ -77,12 +77,12 @@ for (const g of guList) {
   guCenter[g] = [ds.reduce((a, d) => a + d.cx, 0) / ds.length, ds.reduce((a, d) => a + d.cy, 0) / ds.length];
 }
 // 도로(OpenStreetMap): 등급·차선 수별로 묶어 Path2D 하나씩 (km 좌표)
-const ROAD_STYLE = [ // 등급 0 고속도로 ~ 4 집산도로
-  { name: '고속도로',   color: 'rgba(240,160,80,.85)',  minZ: 0 },
-  { name: '도시고속·국도', color: 'rgba(235,200,120,.8)', minZ: 0 },
-  { name: '간선도로',   color: 'rgba(225,230,238,.72)', minZ: 0 },
-  { name: '보조간선',   color: 'rgba(190,198,210,.6)',  minZ: 40 },
-  { name: '집산도로',   color: 'rgba(160,170,185,.5)',  minZ: 90 },
+const ROAD_STYLE = [ // 등급 0 고속도로 ~ 4 집산도로. case: 테두리, fill: 속
+  { name: '고속도로',      case: '#e39a45', fill: '#fcd6a4', minZ: 0 },
+  { name: '도시고속·국도', case: '#d8b25a', fill: '#fbeab4', minZ: 0 },
+  { name: '간선도로',      case: '#b8bfca', fill: '#ffffff', minZ: 0 },
+  { name: '보조간선',      case: '#c6ccd5', fill: '#ffffff', minZ: 40 },
+  { name: '집산도로',      case: '#d0d5dc', fill: '#ffffff', minZ: 90 },
 ];
 // ── 도로망 그래프 ──
 const RN = window.ROADNET || { nodes: [], edges: [] };
@@ -134,7 +134,7 @@ function snapStop(s) {
         const t = L2 ? Math.max(0, Math.min(1, ((s.x - x1) * dx + (s.y - y1) * dy) / L2)) : 0;
         const px = x1 + dx * t, py = y1 + dy * t, d = Math.hypot(s.x - px, s.y - py);
         const cur = byEdge.get(e.id);
-        if (!cur || d < cur.d) byEdge.set(e.id, { e, d, x: px, y: py, along: e.cum[k] + Math.sqrt(L2) * t });
+        if (!cur || d < cur.d) byEdge.set(e.id, { e, d, x: px, y: py, along: e.cum[k] + Math.sqrt(L2) * t, tx: dx / (Math.sqrt(L2) || 1), ty: dy / (Math.sqrt(L2) || 1) });
       }
     }
   }
@@ -240,6 +240,17 @@ function pointAlong(pts, d) {
   }
   return pts[0];
 }
+
+// 정류장을 도로 가운데로 옮긴다. 상·하행이 따로 그려진 큰길(마주 보는 일방통행 두 줄)이면 그 사이 가운데
+for (const s of stops) {
+  const cs = snapStop(s);
+  if (!cs.length || cs[0].d > 0.08) continue;
+  const a = cs[0];
+  const pair = a.e.o && cs.find(c => c !== a && c.e.o && c.tx * a.tx + c.ty * a.ty < -0.7 && Math.hypot(c.x - a.x, c.y - a.y) < 0.045);
+  s.x = pair ? (a.x + pair.x) / 2 : a.x;
+  s.y = pair ? (a.y + pair.y) / 2 : a.y;
+}
+snapCache.clear();
 
 const dongDemand = {};
 for (const s of stops) dongDemand[s.gu + ' ' + s.dong] = (dongDemand[s.gu + ' ' + s.dong] || 0) + s.on;
@@ -594,6 +605,8 @@ function addRoute(stopIds, loop) {
   return r;
 }
 
+// 흰 바탕에서 잘 안 보이는 연한 등급 색은 진하게
+const ink = c => ({ '#e5e7eb': '#6b7280', '#fbbf24': '#d97706', '#a3e635': '#65a30d' })[c] || c;
 const busType = b => CFG.busTypes[b.type];
 const busTier = b => busType(b).levels[b.lvl];
 const busLabel = b => `${busType(b).icon} ${b.id}호 ${busTier(b).name}`;
@@ -851,14 +864,14 @@ function traceOffset(pts, off) {
   }
 }
 
-function stopRadius(s) { return Math.max(2.2, Math.min(14, Math.sqrt(s.on) / 7)) * Math.min(1.6, Math.max(0.6, cam.z / 120)); }
+function stopRadius(s) { return Math.max(4, Math.min(13, 3 + Math.sqrt(s.on) / 8)) * Math.min(1.5, Math.max(0.75, cam.z / 140)); }
 
 // 배경(행정동·도로·지역 이름)은 화면이 바뀔 때만 다시 그린다
 const bgCanvas = document.createElement('canvas');
 let bgKey = '';
 function drawStatic(ctx) {
   ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
-  ctx.fillStyle = '#0f1216';
+  ctx.fillStyle = '#eef0f3';
   ctx.fillRect(0, 0, W, H);
 
   // 행정동
@@ -868,11 +881,11 @@ function drawStatic(ctx) {
     ctx.beginPath();
     for (const r of d.rings) { r.forEach(([x, y], i) => i ? ctx.lineTo(sx(x), sy(y)) : ctx.moveTo(sx(x), sy(y))); ctx.closePath(); }
     if (open) {
-      const v = Math.min(1, Math.sqrt((dongDemand[d.gu + ' ' + d.name] || 0) / maxDem));
-      ctx.fillStyle = `rgba(${40 + 50 * v}, ${60 + 40 * v}, ${80 + 30 * v}, 1)`;
-    } else ctx.fillStyle = '#1a1d21';
+      const v = Math.min(1, Math.sqrt((dongDemand[d.gu + ' ' + d.name] || 0) / maxDem)); // 수요가 많을수록 푸르게
+      ctx.fillStyle = `rgb(${Math.round(252 - 32 * v)}, ${Math.round(253 - 18 * v)}, ${Math.round(255 - 4 * v)})`;
+    } else ctx.fillStyle = '#e2e5ea';
     ctx.fill();
-    ctx.strokeStyle = open ? '#4a5563' : '#262a30';
+    ctx.strokeStyle = open ? '#cfd5de' : '#d6dae0';
     ctx.lineWidth = 1;
     ctx.stroke();
   }
@@ -882,12 +895,16 @@ function drawStatic(ctx) {
     ctx.setTransform(DPR * cam.z, 0, 0, DPR * cam.z, DPR * (W / 2 - cam.x * cam.z), DPR * (H / 2 - cam.y * cam.z));
     ctx.lineCap = 'round'; ctx.lineJoin = 'round';
     const zf = Math.max(0.35, Math.min(3, cam.z / 160)); // 확대할수록 굵게
-    for (const L of roadLayers) {
+    const widthPx = L => Math.max(0.8, (0.5 + L.l * 0.85) * zf); // 차선 수 → 픽셀 굵기
+    for (const L of roadLayers) { // 1) 테두리
       const st = ROAD_STYLE[L.c];
       if (cam.z < st.minZ) continue;
-      ctx.strokeStyle = st.color;
-      ctx.lineWidth = Math.max(0.6, (0.5 + L.l * 0.85) * zf) / cam.z; // 차선 수 → 픽셀 굵기
-      ctx.stroke(L.path);
+      ctx.strokeStyle = st.case; ctx.lineWidth = (widthPx(L) + 1.6) / cam.z; ctx.stroke(L.path);
+    }
+    for (const L of roadLayers) { // 2) 속
+      const st = ROAD_STYLE[L.c];
+      if (cam.z < st.minZ || widthPx(L) < 1.6) continue;
+      ctx.strokeStyle = st.fill; ctx.lineWidth = widthPx(L) / cam.z; ctx.stroke(L.path);
     }
     ctx.restore();
   }
@@ -897,13 +914,13 @@ function drawStatic(ctx) {
     const [x, y] = guCenter[g];
     const open = G.unlocked.has(g);
     ctx.font = `bold ${open ? 13 : 14}px sans-serif`;
-    ctx.fillStyle = open ? 'rgba(255,255,255,.18)' : '#5b6470';
+    ctx.fillStyle = open ? 'rgba(100,116,139,.35)' : '#6b7280';
     ctx.fillText(open ? g : `🔒 ${g}`, sx(x), sy(y) - (open ? 0 : 8));
     if (!open) { ctx.font = '12px sans-serif'; ctx.fillText(won(CFG.unlockCost[g]), sx(x), sy(y) + 10); }
   }
   // 동 이름 (확대 시)
   if (cam.z > 160) {
-    ctx.font = '11px sans-serif'; ctx.fillStyle = 'rgba(255,255,255,.28)';
+    ctx.font = '11px sans-serif'; ctx.fillStyle = 'rgba(100,116,139,.55)';
     for (const d of dongs) if (G.unlocked.has(d.gu)) ctx.fillText(d.name, sx(d.cx), sy(d.cy));
   }
 
@@ -928,58 +945,75 @@ function draw() {
     ctx.beginPath();
     for (const pts of r.geom) if (pts) traceOffset(pts, off);
     for (const pts of r.geomB || []) if (pts) traceOffset(pts, -off);
-    ctx.strokeStyle = r.color; ctx.lineWidth = selected && selected.type === 'route' && selected.r === r ? 7 : 4;
-    ctx.lineJoin = 'round'; ctx.globalAlpha = 0.85; ctx.stroke(); ctx.globalAlpha = 1;
+    const w = selected && selected.type === 'route' && selected.r === r ? 7 : 4;
+    ctx.lineJoin = 'round'; ctx.lineCap = 'round';
+    ctx.strokeStyle = '#ffffff'; ctx.lineWidth = w + 3; ctx.stroke();
+    ctx.strokeStyle = r.color; ctx.lineWidth = w; ctx.stroke();
   }
   // 그리는 중인 노선
   if (editing) {
     tracePath(editing.stops, editing.r.loop);
-    ctx.setLineDash([8, 6]); ctx.strokeStyle = '#fff'; ctx.lineWidth = 3; ctx.stroke(); ctx.setLineDash([]);
+    ctx.setLineDash([8, 6]); ctx.strokeStyle = '#111827'; ctx.lineWidth = 3; ctx.stroke(); ctx.setLineDash([]);
     // 마우스를 올린 정류장이 들어갈 자리 미리 보기
     if (hoverStop && !editing.stops.includes(hoverStop.id)) {
       const L = editing.stops, k = insertPos(L, hoverStop.id, editing.r.loop);
       const a = k > 0 ? L[k - 1] : (editing.r.loop ? L[L.length - 1] : null);
       const b = k < L.length ? L[k] : (editing.r.loop ? L[0] : null);
       tracePath([a, hoverStop.id, b].filter(v => v != null), false);
-      ctx.strokeStyle = '#facc15'; ctx.lineWidth = 3; ctx.stroke();
+      ctx.strokeStyle = '#f59e0b'; ctx.lineWidth = 4; ctx.stroke();
     } else if (hoverStop && editing.stops.length > (editing.r.loop ? 3 : 2)) {
       ctx.beginPath(); ctx.arc(sx(hoverStop.x), sy(hoverStop.y), stopRadius(hoverStop) + 6, 0, Math.PI * 2);
-      ctx.strokeStyle = '#f87171'; ctx.lineWidth = 3; ctx.stroke();
+      ctx.strokeStyle = '#dc2626'; ctx.lineWidth = 3; ctx.stroke();
     }
   }
   if (drawing && drawing.length) {
     const ids = hoverStop && !drawing.includes(hoverStop.id) ? [...drawing, hoverStop.id] : drawing;
     tracePath(ids, false);
     if (!hoverStop) ctx.lineTo(mouse.x, mouse.y);
-    ctx.setLineDash([8, 6]); ctx.strokeStyle = '#fff'; ctx.lineWidth = 3; ctx.stroke(); ctx.setLineDash([]);
+    ctx.setLineDash([8, 6]); ctx.strokeStyle = '#111827'; ctx.lineWidth = 3; ctx.stroke(); ctx.setLineDash([]);
   }
 
-  // 정류장
+  // 정류장: 흰 원 + 진한 테두리. 미보유 = 회색 테두리, 보유 = 진회색, 운행 중 = 노선 색 굵은 테두리
+  const picked = id => (drawing && drawing.includes(id)) || (editing && editing.stops.includes(id));
+  ctx.save();
+  ctx.shadowColor = 'rgba(15,23,42,.28)'; ctx.shadowBlur = 3; ctx.shadowOffsetY = 1;
   for (const s of openStops) {
     const X = sx(s.x), Y = sy(s.y);
     if (X < -20 || Y < -20 || X > W + 20 || Y > H + 20) continue;
-    const served = servedBy.get(s.id);
-    const rad = stopRadius(s);
-    const own = G.owned.has(s.id);
+    const served = servedBy.get(s.id), own = G.owned.has(s.id), rad = stopRadius(s);
     ctx.beginPath(); ctx.arc(X, Y, rad, 0, Math.PI * 2);
-    ctx.fillStyle = served ? '#ffffff' : own ? 'rgba(226,232,240,.9)' : 'rgba(148,163,184,.18)';
-    if ((drawing && drawing.includes(s.id)) || (editing && editing.stops.includes(s.id))) ctx.fillStyle = '#facc15';
+    ctx.fillStyle = picked(s.id) ? '#fde047' : own ? '#ffffff' : '#f3f4f6';
     ctx.fill();
-    if (!own) { ctx.lineWidth = 1.2; ctx.strokeStyle = 'rgba(203,213,225,.55)'; ctx.stroke(); }
-    if (served) { ctx.lineWidth = 2.5; ctx.strokeStyle = served[0].color; ctx.stroke(); }
-    if (s === hoverStop) { ctx.lineWidth = 2; ctx.strokeStyle = '#facc15'; ctx.beginPath(); ctx.arc(X, Y, rad + 4, 0, Math.PI * 2); ctx.stroke(); }
-    const q = G.waiting.get(s.id);
-    if (q && q.length) {
-      ctx.font = 'bold 11px sans-serif';
-      ctx.fillStyle = q.length > 20 ? '#f87171' : '#fca5a5';
-      ctx.fillText(q.length, X + rad + 8, Y - rad - 2);
-    }
+    ctx.shadowColor = 'transparent';
+    if (served) { ctx.lineWidth = 3; ctx.strokeStyle = served[0].color; ctx.stroke(); }
+    else { ctx.lineWidth = own ? 2.2 : 1.6; ctx.strokeStyle = own ? '#334155' : '#9ca3af'; if (!own) ctx.setLineDash([2.5, 2]); ctx.stroke(); ctx.setLineDash([]); }
+    if (own && rad >= 6) { ctx.beginPath(); ctx.arc(X, Y, Math.max(1.6, rad * 0.28), 0, Math.PI * 2); ctx.fillStyle = served ? served[0].color : '#334155'; ctx.fill(); }
+    ctx.shadowColor = 'rgba(15,23,42,.28)';
+    if (s === hoverStop) { ctx.lineWidth = 2.5; ctx.strokeStyle = '#f59e0b'; ctx.beginPath(); ctx.arc(X, Y, rad + 4, 0, Math.PI * 2); ctx.stroke(); }
   }
-  // 정류장 이름 (확대 시)
-  if (cam.z > 150) {
-    const minOn = cam.z > 400 ? 0 : cam.z > 250 ? 300 : 1200;
-    ctx.font = '11px sans-serif'; ctx.fillStyle = '#cbd5e1'; ctx.textAlign = 'left';
-    for (const s of openStops) { if (s.on < minOn) continue; const X = sx(s.x), Y = sy(s.y); if (X > 0 && Y > 0 && X < W && Y < H) ctx.fillText(s.name, X + stopRadius(s) + 3, Y + 9); }
+  ctx.restore();
+  // 기다리는 승객: 빨간 숫자 배지
+  ctx.font = 'bold 11px sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  for (const [sid, q] of G.waiting) {
+    if (!q.length) continue;
+    const s = stops[sid], rad = stopRadius(s), X = sx(s.x) + rad + 7, Y = sy(s.y) - rad - 5;
+    if (X < -20 || Y < -20 || X > W + 20 || Y > H + 20) continue;
+    const label = String(q.length), bw = Math.max(16, ctx.measureText(label).width + 8);
+    ctx.fillStyle = q.length > 20 ? '#dc2626' : '#f97316';
+    ctx.beginPath(); ctx.roundRect(X - bw / 2, Y - 8, bw, 16, 8); ctx.fill();
+    ctx.fillStyle = '#fff'; ctx.fillText(label, X, Y + 0.5);
+  }
+  // 정류장 이름: 흰 테두리를 두른 진한 글씨
+  if (cam.z > 110) {
+    const minOn = cam.z > 400 ? 0 : cam.z > 250 ? 300 : cam.z > 170 ? 1000 : 2500;
+    ctx.font = '12px sans-serif'; ctx.textAlign = 'left'; ctx.lineJoin = 'round';
+    for (const s of openStops) {
+      if (s.on < minOn && !servedBy.has(s.id)) continue;
+      const X = sx(s.x) + stopRadius(s) + 4, Y = sy(s.y) + 1;
+      if (X < 0 || Y < 0 || X > W || Y > H) continue;
+      ctx.lineWidth = 3.5; ctx.strokeStyle = 'rgba(255,255,255,.95)'; ctx.strokeText(s.name, X, Y);
+      ctx.fillStyle = G.owned.has(s.id) ? '#111827' : '#6b7280'; ctx.fillText(s.name, X, Y);
+    }
     ctx.textAlign = 'center';
   }
 
@@ -991,10 +1025,12 @@ function draw() {
     ctx.fillStyle = b.route.color;
     const tier = busTier(b);
     const K = busType(b), hw = K.w / 2, hh = K.h / 2;
-    ctx.strokeStyle = tier.color; ctx.lineWidth = 2.2;
+    ctx.strokeStyle = '#111827'; ctx.lineWidth = 1.6;
     ctx.beginPath(); ctx.roundRect(X - hw, Y - hh, K.w, K.h, 2.5); ctx.fill(); ctx.stroke();
+    ctx.fillStyle = tier.color === '#e5e7eb' ? '#9ca3af' : tier.color; // 지붕 띠 = 등급 색
+    ctx.fillRect(X - hw + 1.5, Y - hh + 1.5, K.w - 3, 2.5);
     const f = b.pax.length / tier.cap;
-    ctx.fillStyle = f > 0.9 ? '#f87171' : '#fff';
+    ctx.fillStyle = f > 0.9 ? '#fecaca' : '#fff';
     ctx.fillRect(X - hw + 2, Y + hh - 4, (K.w - 4) * f, 2.5);
   }
 }
@@ -1027,7 +1063,7 @@ function renderSide() {
   for (const r of G.routes) {
     const bs = G.buses.filter(b => b.route === r), n = bs.length;
     const mix = Object.entries(CFG.busTypes).flatMap(([k, T]) => T.levels.map((l, i) => [T, l, i, bs.filter(b => b.type === k && b.lvl === i).length]))
-      .filter(x => x[3]).map(([T, l, i, c]) => `<span style="color:${l.color}">${T.icon}Lv${i + 1}×${c}</span>`).join(' ');
+      .filter(x => x[3]).map(([T, l, i, c]) => `<span style="color:${ink(l.color)}">${T.icon}Lv${i + 1}×${c}</span>`).join(' ');
     const d = document.createElement('div');
     d.className = 'route';
     d.innerHTML = `<span class="sw" style="background:${r.color}"></span>
@@ -1093,7 +1129,7 @@ function renderDepot() {
   el.innerHTML = G.depot.slice().sort((a, b) => a.id - b.id).map(b => {
     const t = busTier(b), next = busType(b).levels[b.lvl + 1];
     return `<div class="bus">
-      <div><span style="color:${t.color}">■</span> ${busType(b).icon} <b>${b.id}호</b> ${t.name} <span class="muted">Lv${b.lvl + 1}</span><br><span class="muted">${busStats(b)}</span></div>
+      <div><span style="color:${ink(t.color)}">■</span> ${busType(b).icon} <b>${b.id}호</b> ${t.name} <span class="muted">Lv${b.lvl + 1}</span><br><span class="muted">${busStats(b)}</span></div>
       <div class="btns">
         <button data-act="dispatch" data-id="${b.id}" ${route ? '' : 'disabled'} title="${route ? route.no + '번 노선에 배차' : '노선을 먼저 선택하세요'}">${route ? `→ ${route.no}번 배차` : '배차'}</button>
         ${next ? `<button data-act="up" data-id="${b.id}" ${G.money < next.upgrade ? 'disabled' : ''} title="${next.name} · 정원 ${next.cap} · 운영비 ${won(next.costPerHour)}/시간 · 쾌적 ${next.comfort}">Lv${b.lvl + 2} ${won(next.upgrade)}</button>` : '<span class="muted" style="align-self:center">최고 레벨</span>'}
@@ -1133,11 +1169,11 @@ function renderInfo() {
       버스 ${bs.length}대 · 탑승 ${load}명 / ${seats}석${h < Infinity ? ` · 배차 약 ${Math.round(h)}분` : ''}
       <div style="margin-top:8px"><b>운행 중</b>${bs.length ? '' : ' <span class="muted">없음</span>'}</div>
       ${bs.map(b => { const t = busTier(b); return `<div style="display:flex;align-items:center;gap:6px;margin:4px 0">
-          <span style="flex:1"><span style="color:${t.color}">■</span> ${busType(b).icon} ${b.id}호 ${t.name} <span class="muted">${b.pax.length}/${t.cap}</span></span>
+          <span style="flex:1"><span style="color:${ink(t.color)}">■</span> ${busType(b).icon} ${b.id}호 ${t.name} <span class="muted">${b.pax.length}/${t.cap}</span></span>
           <button data-act="recall" data-id="${b.id}" title="차고지로 회수 (타고 있던 승객은 내림)">회수</button></div>`; }).join('')}
       <div style="margin-top:8px"><b>차고지에서 배차</b>${G.depot.length ? '' : ' <span class="muted">차고지가 비어 있습니다. 아래에서 버스를 사세요</span>'}</div>
       ${G.depot.slice().sort((a, b) => a.id - b.id).map(b => { const t = busTier(b); return `<div style="display:flex;align-items:center;gap:6px;margin:4px 0">
-          <span style="flex:1"><span style="color:${t.color}">■</span> ${busType(b).icon} ${b.id}호 ${t.name} <span class="muted">정원 ${t.cap}</span></span>
+          <span style="flex:1"><span style="color:${ink(t.color)}">■</span> ${busType(b).icon} ${b.id}호 ${t.name} <span class="muted">정원 ${t.cap}</span></span>
           <button data-act="dispatch" data-id="${b.id}">배차</button></div>`; }).join('')}`;
   } else if (selected.type === 'gu') {
     const g = selected.g;
