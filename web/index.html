@@ -9,8 +9,8 @@
   :root { --bg: #ffffff; --panel: #f7f8fa; --card: #ffffff; --line: #e3e6eb; --ink: #1f2937; --muted: #6b7280; --accent: #2563eb; }
   * { box-sizing: border-box; }
   html, body { margin: 0; height: 100%; font-family: "Pretendard", "Apple SD Gothic Neo", "Noto Sans KR", sans-serif; background: var(--bg); color: var(--ink); }
-  #app { display: grid; grid-template-columns: 1fr 300px; grid-template-rows: 48px 1fr; height: 100%; }
-  #topbar { grid-column: 1 / 3; display: flex; align-items: center; gap: 18px; padding: 0 14px; background: #fff; border-bottom: 1px solid var(--line); font-size: 14px; box-shadow: 0 1px 3px rgba(15,23,42,.05); z-index: 1; }
+  #app { display: grid; grid-template-columns: 1fr; grid-template-rows: 48px 1fr; height: 100%; }
+  #topbar { grid-column: 1; display: flex; align-items: center; gap: 18px; padding: 0 14px; background: #fff; border-bottom: 1px solid var(--line); font-size: 14px; box-shadow: 0 1px 3px rgba(15,23,42,.05); z-index: 1; }
   #topbar .stat b { font-size: 16px; }
   #topbar .spacer { flex: 1; }
   #map { position: relative; overflow: hidden; background: #eef0f3; }
@@ -54,6 +54,28 @@
   #modal td { padding: 4px 0; }
   #modal td:last-child { text-align: right; font-variant-numeric: tabular-nums; }
   #modal hr { border: 0; border-top: 1px solid var(--line) !important; }
+  /* 설정창 · 메뉴 · 선택 카드 */
+  #dock { position: absolute; left: 50%; bottom: 16px; transform: translateX(-50%); display: flex; gap: 6px; background: #fff; border: 1px solid var(--line); border-radius: 14px; padding: 6px; box-shadow: 0 6px 20px rgba(15,23,42,.14); }
+  #dock button { border: 0; padding: 9px 14px; border-radius: 10px; font-size: 14px; font-weight: 600; display: flex; align-items: center; gap: 6px; }
+  #dock button.on { background: var(--accent); color: #fff; }
+  #dock .badge { min-width: 18px; height: 18px; padding: 0 5px; border-radius: 9px; background: #eef2ff; color: #3730a3; font-size: 11px; display: inline-flex; align-items: center; justify-content: center; }
+  #dock .badge:empty { display: none; }
+  #dock button.on .badge { background: rgba(255,255,255,.25); color: #fff; }
+  #panel { position: absolute; top: 12px; right: 12px; bottom: 84px; width: 360px; max-width: calc(100% - 24px); display: flex; flex-direction: column; background: var(--panel); border: 1px solid var(--line); border-radius: 14px; box-shadow: 0 12px 32px rgba(15,23,42,.18); overflow: hidden; font-size: 13px; }
+  #panel[hidden], #infoCard[hidden] { display: none; }
+  #panel header, #infoCard header { display: flex; align-items: center; justify-content: space-between; padding: 10px 12px; background: #fff; border-bottom: 1px solid var(--line); }
+  #panel h2 { margin: 0; font-size: 16px; }
+  #panel header button, #infoCard header button { border: 0; padding: 2px 8px; font-size: 14px; }
+  .pbody { padding: 12px; overflow-y: auto; flex: 1; display: none; }
+  .pbody.on { display: block; }
+  .pdesc { margin: 0 0 10px; color: var(--muted); font-size: 12px; line-height: 1.5; }
+  .field { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
+  .field label { color: var(--muted); font-size: 12px; white-space: nowrap; }
+  .field select { flex: 1; min-width: 0; text-overflow: ellipsis; font: inherit; padding: 5px 6px; border: 1px solid #d1d5db; border-radius: 6px; background: #fff; }
+  #infoCard { position: absolute; left: 12px; bottom: 84px; width: 330px; max-width: calc(100% - 24px); max-height: 48%; display: flex; flex-direction: column; background: #fff; border: 1px solid var(--line); border-radius: 14px; box-shadow: 0 12px 32px rgba(15,23,42,.18); overflow: hidden; font-size: 13px; }
+  #infoCard #info { border: 0; border-radius: 0; overflow-y: auto; padding: 10px 12px; }
+  #toast { bottom: 84px !important; }
+  #attr { bottom: 4px; }
   .pos { color: #15803d; } .neg { color: #dc2626; }
   .muted { color: var(--muted); }
   .legend { font-size: 12px; color: var(--muted); line-height: 1.6; }
@@ -72,9 +94,10 @@
     <span class="stat muted" id="todayStat"></span>
     <span class="spacer"></span>
     <button id="sp0" title="일시정지 (Space)">⏸</button>
-    <button id="sp1" class="on">1x</button>
-    <button id="sp2">3x</button>
-    <button id="sp3">8x</button>
+    <button id="sp1" class="on" title="1배속">1x</button>
+    <button id="sp2" title="2배속">2x</button>
+    <button id="sp3" title="3배속">3x</button>
+    <button id="sp4" title="10배속">10x</button>
   </div>
   <div id="map">
     <canvas id="cv"></canvas>
@@ -82,19 +105,33 @@
     <div id="tooltip"></div>
     <div id="toast"></div>
     <div id="attr">도로 © <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a> 기여자</div>
-  </div>
-  <div id="side">
-    <h3>노선</h3>
-    <div id="routes"></div>
-    <button id="newRoute" class="primary" style="width:100%">＋ 새 노선 만들기</button>
-    <h3>선택 정보</h3>
-    <div id="info" class="muted">정류장이나 지역을 클릭하세요.</div>
-    <h3>차고지</h3>
-    <div id="buyBus" class="buybus"></div>
-    <div id="depot"></div>
-    <h3>지역 개방</h3>
-    <div id="gus"></div>
-    <h3>도움말</h3>
+
+    <!-- 아래 메뉴: 누르면 오른쪽에 설정창 -->
+    <nav id="dock">
+      <button data-panel="routes" title="노선 (1)">🚌 노선 <span class="badge" id="bRoutes"></span></button>
+      <button data-panel="depot" title="차고지 (2)">🅿️ 차고지 <span class="badge" id="bDepot"></span></button>
+      <button data-panel="regions" title="지역 개방 (3)">🗺️ 지역 개방 <span class="badge" id="bRegions"></span></button>
+      <button data-panel="help" title="도움말 (4)">❓ 도움말</button>
+    </nav>
+
+    <section id="panel" hidden>
+      <header><h2 id="panelTitle"></h2><button id="panelClose" title="닫기 (Esc)">✕</button></header>
+      <div class="pbody" data-p="routes">
+        <p class="pdesc">노선을 고르면 왼쪽 아래 카드에서 버스를 배차·회수할 수 있습니다.</p>
+        <div id="routes"></div>
+        <button id="newRoute" class="primary" style="width:100%">＋ 새 노선 만들기</button>
+      </div>
+      <div class="pbody" data-p="depot">
+        <p class="pdesc">버스를 사면 차고지에 들어옵니다. 업그레이드·매각은 차고지에서만 할 수 있고, 운영비는 운행 중인 버스만 냅니다.</p>
+        <div class="field"><label for="depotRoute">배차할 노선</label><select id="depotRoute"></select></div>
+        <div id="buyBus" class="buybus"></div>
+        <div id="depot"></div>
+      </div>
+      <div class="pbody" data-p="regions">
+        <p class="pdesc">돈을 모아 다른 구를 엽니다. 연 뒤에는 그 구의 정류장을 사서 노선에 넣을 수 있습니다.</p>
+        <div id="gus"></div>
+      </div>
+      <div class="pbody" data-p="help">
     <div class="legend">
       · 드래그: 지도 이동 / 휠: 확대·축소<br>
       · 새 노선 → 정류장을 순서대로 클릭 → Enter(완료)<br>
@@ -116,6 +153,14 @@
       · 승객 목적지는 노선이 닿는 곳으로만 정해집니다<br>
       · 적자여도 만족도 60% 이상이면 준공영제 보조금(적자의 50%)
     </div>
+      </div>
+    </section>
+
+    <!-- 선택 정보 카드 -->
+    <section id="infoCard" hidden>
+      <header><b>선택 정보</b><button id="infoClose" title="닫기">✕</button></header>
+      <div id="info"></div>
+    </section>
   </div>
 </div>
 <div id="modal"><div class="box" id="modalBox"></div></div>

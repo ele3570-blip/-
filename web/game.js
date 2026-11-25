@@ -156,6 +156,18 @@ function edgePart(e, from, to) {
   else { for (let k = e.pts.length - 1; k >= 0; k--) if (e.cum[k] < from && e.cum[k] > to) out.push(e.pts[k]); }
   return out;
 }
+// pts의 모든 점이 line에서 tol(km) 안쪽인지
+function nearPolyline(pts, line, tol) {
+  if (!line) return false;
+  return pts.every(([px, py]) => {
+    for (let k = 1; k < line.length; k++) {
+      const [x1, y1] = line[k - 1], [x2, y2] = line[k], dx = x2 - x1, dy = y2 - y1, L2 = dx * dx + dy * dy;
+      const t = L2 ? Math.max(0, Math.min(1, ((px - x1) * dx + (py - y1) * dy) / L2)) : 0;
+      if (Math.hypot(px - x1 - dx * t, py - y1 - dy * t) <= tol) return true;
+    }
+    return false;
+  });
+}
 function polyLen(pts) { let L = 0; for (let k = 1; k < pts.length; k++) L += Math.hypot(pts[k][0] - pts[k - 1][0], pts[k][1] - pts[k - 1][1]); return L; }
 // 정류장 사이 도로를 따라가는 최단 경로 → { pts, km }. 일방통행을 지키므로 방향마다 다를 수 있음
 const pathCache = new Map();
@@ -315,6 +327,8 @@ function rebuildNetwork() {
       if (!r.loop) { const Q = roadPath(r.stops[j], id); r.geomB.push(Q.pts); r.segLenB.push(Q.km); }
       return P.km;
     });
+    // 돌아오는 길이 가는 길과 60m 안쪽으로 나란하면(상·하행이 두 줄로 그려진 큰길) 그리지 않고 한 줄로 보이게
+    r.drawB = r.geomB.map((Q, k) => !!Q && !nearPolyline(Q, r.geom[k], 0.06));
     // near: 목적지 정류장 → 내릴 정류장 인덱스 (걸어서 갈 수 있는 거리 안에서 가장 가까운 곳)
     r.near = new Map();
     r.stops.forEach((id, i) => {
@@ -970,7 +984,7 @@ function draw() {
     const off = routeOffsetPx(r);
     ctx.beginPath();
     for (const pts of r.geom) if (pts) traceOffset(pts, off);
-    for (const pts of r.geomB || []) if (pts) traceOffset(pts, -off);
+    (r.geomB || []).forEach((pts, k) => { if (pts && r.drawB[k]) traceOffset(pts, -off); });
     const w = selected && selected.type === 'route' && selected.r === r ? 7 : 4;
     ctx.lineJoin = 'round'; ctx.lineCap = 'round';
     ctx.strokeStyle = '#ffffff'; ctx.lineWidth = w + 3; ctx.stroke();
@@ -1105,6 +1119,7 @@ function renderSide() {
     el.append(d);
   }
   renderDepot();
+  renderBadges();
   const gl = $('gus');
   gl.innerHTML = '';
   for (const g of guList) {
@@ -1141,7 +1156,23 @@ function busStats(b) {
   const t = busTier(b);
   return `정원 ${t.cap} · 운영비 ${won(t.costPerHour)}/시간 · 쾌적 ${t.comfort}`;
 }
+// 차고지에서 배차할 노선: 위쪽 선택 상자 (노선을 고르면 그 노선으로 맞춰짐)
+let depotRouteNo = null, lastPickedRoute = null;
+function depotTarget() { return G.routes.find(r => r.no === depotRouteNo) || null; }
+function renderDepotRoutes() {
+  const sel = $('depotRoute');
+  const picked = selected && selected.type === 'route' ? selected.r : null;
+  if (picked && picked !== lastPickedRoute) depotRouteNo = picked.no; // 지도·목록에서 노선을 새로 고른 경우만
+  lastPickedRoute = picked;
+  if (!depotTarget()) depotRouteNo = G.routes[0] ? G.routes[0].no : null;
+  sel.innerHTML = G.routes.length ? G.routes.map(r => `<option value="${r.no}" ${r.no === depotRouteNo ? 'selected' : ''}>${r.no}번 · ${routeName(r)} (운행 ${G.buses.filter(b => b.route === r).length}대)</option>`).join('')
+    : '<option>노선이 없습니다</option>';
+  sel.disabled = !G.routes.length;
+}
+$('depotRoute').addEventListener('change', e => { depotRouteNo = +e.target.value; renderDepot(); });
+
 function renderDepot() {
+  renderDepotRoutes();
   const buy = $('buyBus');
   if (!buy.dataset.built) {
     buy.dataset.built = '1';
@@ -1149,7 +1180,7 @@ function renderDepot() {
       ${T.icon} ${T.name}<br><span class="muted">${won(T.price)}</span></button>`).join('');
   }
   for (const btn of buy.querySelectorAll('button')) btn.disabled = G.money < CFG.busTypes[btn.dataset.buy].price;
-  const route = selected && selected.type === 'route' ? selected.r : null;
+  const route = depotTarget();
   const el = $('depot');
   if (!G.depot.length) { el.innerHTML = '<div class="muted">차고지가 비어 있습니다.</div>'; return; }
   el.innerHTML = G.depot.slice().sort((a, b) => a.id - b.id).map(b => {
@@ -1171,12 +1202,37 @@ $('depot').addEventListener('click', e => {
   if (!b) return;
   if (btn.dataset.act === 'up') upgradeBus(b);
   if (btn.dataset.act === 'sell') sellBus(b);
-  if (btn.dataset.act === 'dispatch' && selected && selected.type === 'route') dispatch(b, selected.r);
+  if (btn.dataset.act === 'dispatch' && depotTarget()) dispatch(b, depotTarget());
 });
+
+// ── 설정창(노선 · 차고지 · 지역 개방 · 도움말) ──
+const PANELS = { routes: '🚌 노선', depot: '🅿️ 차고지', regions: '🗺️ 지역 개방', help: '❓ 도움말' };
+let openPanelName = null, panelBeforeMapMode = null;
+function openPanel(name) {
+  openPanelName = name;
+  $('panel').hidden = !name;
+  if (name) $('panelTitle').textContent = PANELS[name];
+  for (const el of document.querySelectorAll('#panel .pbody')) el.classList.toggle('on', el.dataset.p === name);
+  for (const b of document.querySelectorAll('#dock button')) b.classList.toggle('on', b.dataset.panel === name);
+}
+function togglePanel(name) { openPanel(openPanelName === name ? null : name); }
+for (const b of document.querySelectorAll('#dock button')) b.onclick = () => togglePanel(b.dataset.panel);
+$('panelClose').onclick = () => openPanel(null);
+$('infoClose').onclick = () => { selected = null; renderSide(); };
+// 지도에서 노선을 그리거나 고칠 때는 설정창을 잠시 닫았다가 끝나면 다시 연다
+function hidePanelForMap() { if (openPanelName) { panelBeforeMapMode = openPanelName; openPanel(null); } }
+function restorePanel() { if (panelBeforeMapMode) { openPanel(panelBeforeMapMode); panelBeforeMapMode = null; } }
+function renderBadges() {
+  $('bRoutes').textContent = G.routes.length || '';
+  $('bDepot').textContent = G.depot.length || '';
+  const can = guList.filter(g => !G.unlocked.has(g) && G.money >= CFG.unlockCost[g]).length;
+  $('bRegions').textContent = can ? '+' + can : '';
+}
 
 function renderInfo() {
   const el = $('info');
-  if (!selected) { el.innerHTML = '<span class="muted">정류장이나 지역을 클릭하세요.</span>'; return; }
+  $('infoCard').hidden = !selected;
+  if (!selected) { el.innerHTML = ''; return; }
   if (selected.type === 'stop') {
     const s = selected.s, rs = servedBy.get(s.id) || [], own = G.owned.has(s.id), price = stopPrice(s);
     el.innerHTML = `<b>${s.name}</b> ${own ? '<span class="pos">보유</span>' : '<span class="muted">미보유</span>'}<br><span class="muted">${s.gu} ${s.dong}${s.n > 1 ? ` · 정류소 ${s.n}곳 묶음` : ''}</span><br>
@@ -1228,13 +1284,14 @@ function renderTop() {
   $('todayStat').textContent = `오늘 수송 ${fmt(G.today.pax)}명 · 대기 ${fmt(waiting)}명 · 수입 ${won(G.today.revenue)} · 운영비 ${won(G.today.cost)}`;
 }
 
-const SPEEDS = [0, 1, 3, 8];
+const SPEEDS = [0, 1, 2, 3, 10];
 function setSpeedUI() { SPEEDS.forEach((v, i) => $('sp' + i).classList.toggle('on', G.paused ? i === 0 : v === G.speed)); }
 SPEEDS.forEach((v, i) => $('sp' + i).onclick = () => { if (i === 0) G.paused = !G.paused; else { G.speed = v; G.paused = false; } setSpeedUI(); });
 
 function setHint(t) { const h = $('hint'); h.innerHTML = t; h.style.display = t ? 'block' : 'none'; }
 
 function startDrawing() {
+  hidePanelForMap();
   drawing = [];
   cv.classList.add('drawing');
   setHint('정류장을 순서대로 클릭하세요 · <b>Enter</b> 완료 · <b>Backspace</b> 되돌리기 · <b>Esc</b> 취소');
@@ -1249,20 +1306,21 @@ function finishDrawing(loop = false) {
   save();
   toast(`${r.no}번 노선을 만들었습니다. 차고지에서 버스를 배차하세요`, '#15803d');
 }
-function cancelDrawing() { drawing = null; cv.classList.remove('drawing'); setHint(''); }
+function cancelDrawing() { drawing = null; cv.classList.remove('drawing'); setHint(''); restorePanel(); }
 $('newRoute').onclick = () => { if (editing) cancelEdit(); drawing ? finishDrawing() : startDrawing(); };
 
 // ── 노선 수정 ──
 let editing = null; // { r, stops }
 function startEdit(r) {
   if (drawing) cancelDrawing();
+  hidePanelForMap();
   editing = { r, stops: r.stops.slice() };
   selected = { type: 'route', r };
   cv.classList.add('drawing');
   setHint(`<b style="color:${r.color}">${r.no}번</b> 수정 중 · 새 정류장 클릭: 추가 · 노선 정류장 클릭: 빼기 · <b>Enter</b> 적용 · <b>Esc</b> 취소`);
   renderInfo();
 }
-function cancelEdit() { editing = null; cv.classList.remove('drawing'); setHint(''); }
+function cancelEdit() { editing = null; cv.classList.remove('drawing'); setHint(''); restorePanel(); }
 function editClick(s) {
   const L = editing.stops, loop = editing.r.loop;
   const k = L.indexOf(s.id);
@@ -1392,7 +1450,7 @@ cv.addEventListener('wheel', e => {
   cam.x = mx - (e.offsetX - W / 2) / cam.z; cam.y = my - (e.offsetY - H / 2) / cam.z;
 }, { passive: false });
 window.addEventListener('keydown', e => {
-  if (e.target.tagName === 'INPUT') return;
+  if (['INPUT', 'SELECT', 'TEXTAREA'].includes(e.target.tagName)) return;
   if (editing) {
     if (e.key === 'Enter') applyEdit();
     else if (e.key === 'Escape') cancelEdit();
@@ -1405,6 +1463,8 @@ window.addEventListener('keydown', e => {
     return;
   }
   if (e.key === ' ') { e.preventDefault(); $('sp0').click(); }
+  else if (e.key === 'Escape') { if (openPanelName) openPanel(null); else if (selected) { selected = null; renderSide(); } }
+  else if ('1234'.includes(e.key) && e.key.length === 1) togglePanel(Object.keys(PANELS)[+e.key - 1]);
 });
 window.addEventListener('resize', resize);
 
