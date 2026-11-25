@@ -158,6 +158,14 @@ function draw() {
     }
   }
   ctx.setLineDash([]); ctx.globalAlpha = 1;
+  // 선택한 선로 구간 강조
+  if (selected?.type === 'track') {
+    ctx.strokeStyle = 'rgba(250,204,21,.75)'; ctx.lineWidth = 12; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+    for (const sc of selected.e.secs) for (const e of sc.edges) if (edgeVisible(e)) strokePts(edgeScreen(e, 0));
+    ctx.strokeStyle = 'rgba(234,88,12,.9)'; ctx.lineWidth = 5;
+    strokePts(edgeScreen(selected.e, 0));
+    ctx.lineCap = 'butt';
+  }
   // 노선
   const selRoute = selected?.type === 'route' ? selected.r : null;
   for (const r of G.routes) {
@@ -304,6 +312,38 @@ function trainHtml(t) {
     <div>승객 <b>${t.pax.length}</b> / ${tier.cap}명</div>
     <div class="btns" style="display:flex;gap:4px;margin-top:6px"><button data-recall="${t.id}">차량기지로 회수</button><button data-selroute="${r.no}">노선 보기</button></div>`;
 }
+// 선로 구간 카드: 누른 곳이 속한 구간(지역 경계면 두 구간)
+function trackHtml(e) {
+  const l = e.line, A = stations[e.a], B = stations[e.b];
+  let h = `<div><b style="font-size:15px">${esc(l.name)}</b>
+    <span class="tag ${l.kind === 'hs' ? '' : 'gray'}">${l.kind === 'hs' ? '고속선' : '일반선'}</span>
+    <span class="tag ${S.lineElec(l) ? 'ok' : 'warn'}">${S.lineElec(l) ? '전철화' : '비전철'}</span>
+    <span class="tag gray">${l.kind === 'hs' ? '고속 복선' : S.lineDbl(l) ? '복선' : '단선'}</span>
+    <span class="tag gray">${S.lineVmax(l)}km/h</span></div>
+    <div class="muted">누른 곳: ${esc(A.name)}–${esc(B.name)} ${fmt(e.km)}km${l.kind === 'hs' ? ' · KTX만 다님' : S.lineElec(l) ? '' : ' · 광역열차·KTX·ITX-마음은 못 다님'}</div>`;
+  for (const sc of e.secs) {
+    const open = G.unlocked.has(sc.region), own = S.secOwned(sc), price = S.sectionPrice(sc);
+    const ends = sc.edges.flatMap(x => [x.a, x.b]);
+    const names = [...new Set(ends)].map(i => stations[i].name);
+    h += `<div class="wbox"><div><b>${esc(S.regionName[sc.region])} 구간</b> · ${fmt(sc.km)}km ${own ? '<span class="tag ok">보유</span>' : ''}</div>
+      <div class="muted">${esc(names[0])} … ${esc(names[names.length - 1])} (역 ${names.length}개)</div>`;
+    if (own) h += '';
+    else if (!open) {
+      const c = CFG.unlockCost[sc.region], reach = S.regionReachable(sc.region);
+      h += `<div style="margin-top:6px">아직 열지 않은 지역입니다.</div>
+        <div class="btns" style="display:flex;gap:4px;margin-top:6px"><button data-unlock="${sc.region}" ${!reach || G.money < c ? 'disabled' : ''}>🗺️ ${esc(S.regionName[sc.region])} 열기 ${won(c)}</button></div>`;
+    } else h += `<div class="btns" style="display:flex;gap:4px;margin-top:6px"><button class="primary" data-buysec="${sc.id}" ${G.money < price ? 'disabled' : ''}>🏷 이 구간 사기 ${won(price)}</button></div>`;
+    h += '</div>';
+  }
+  const btn = (what, label) => { const c = S.upgradeCost(l, what); return c == null ? '' : `<button data-lup="${l.id}:${what}" ${G.money < c ? 'disabled' : ''}>${label} ${won(c)}</button>`; };
+  if (S.ownedKm(l) > 0) {
+    const load = S.edgeLoad.get(e.id) || 0;
+    h += `<div style="margin-top:6px">이 구간 열차 시간당 ${load.toFixed(1)}대 / 용량 ${S.edgeCap(e)}대 ${load > S.edgeCap(e) ? '<span class="tag warn">초과 → 감속</span>' : ''}</div>
+      <div class="wsub">${esc(l.name)} 개량 (산 구간 ${fmt(S.ownedKm(l))}km)</div>
+      <div class="btns" style="display:flex;flex-wrap:wrap;gap:4px">${btn('elec', '⚡ 전철화') + btn('dbl', '🛤 복선화') + btn('speed', '🚀 고속화') || '<span class="muted">할 수 있는 개량이 없습니다</span>'}</div>`;
+  }
+  return h;
+}
 function renderInfo() {
   const card = $('infoCard');
   if (!selected) { card.hidden = true; return; }
@@ -315,7 +355,7 @@ function renderInfo() {
   } else if (selected.type === 'train') {
     if (!G.trains.includes(selected.t)) { selected = null; card.hidden = true; return; }
     $('infoTitle').textContent = '🚆 열차'; $('info').innerHTML = trainHtml(selected.t);
-  }
+  } else if (selected.type === 'track') { $('infoTitle').textContent = '🛤 선로'; $('info').innerHTML = trackHtml(selected.e); }
 }
 
 // ───────────────────────── 설정창 ─────────────────────────
@@ -396,7 +436,7 @@ function renderHelp() {
     · 드래그: 지도 이동 / 휠: 확대·축소 / Space: 일시정지<br>
     · 확장 순서: 🗺️ 지역 열기 → 🔧 선로 구간 사기 → 역 사기 → 노선 만들기<br>
     &nbsp;&nbsp;노선을 그리다 안 산 역·구간을 누르면 바로 살 수 있습니다<br>
-    · 점선 테두리 역 = 아직 안 산 역 / 흐린 선로 = 아직 안 산 구간<br>
+    · 점선 테두리 역 = 아직 안 산 역 / 흐린 선로 = 아직 안 산 구간. 선로를 누르면 그 구간을 사거나 개량할 수 있습니다<br>
     · 새 노선: 종류 선택 → 정차할 역을 순서대로 클릭 → Enter(완료)<br>
     &nbsp;&nbsp;사이에 있는 역은 통과합니다(급행). Backspace: 마지막 역 취소 / Esc: 취소<br>
     · ✏️ 정차역 수정: 정차역 클릭 → 빼기, 다른 역 클릭 → 넣기, Enter 적용<br>
@@ -540,6 +580,29 @@ function trainAt(px, py) {
   for (const t of G.trains) { const p = trainScreen(t), d = Math.hypot(p.X - px, p.Y - py); if (d < bd) { bd = d; best = t; } }
   return best;
 }
+// 화면 점들(선)과 점 사이 거리
+function distToPts(pts, px, py) {
+  let bd = Infinity;
+  for (let k = 1; k < pts.length; k++) {
+    const [x1, y1] = pts[k - 1], [x2, y2] = pts[k];
+    const L2 = (x2 - x1) ** 2 + (y2 - y1) ** 2 || 1;
+    const u = Math.max(0, Math.min(1, ((px - x1) * (x2 - x1) + (py - y1) * (y2 - y1)) / L2));
+    bd = Math.min(bd, Math.hypot(x1 + u * (x2 - x1) - px, y1 + u * (y2 - y1) - py));
+  }
+  return bd;
+}
+// 선로 구간(엣지) 누르기
+function edgeAt(px, py, tol = 8) {
+  let best = null, bd = tol;
+  for (const e of edges) {
+    if (!edgeVisible(e)) continue;
+    const d = distToPts(edgeScreen(e, 0), px, py);
+    if (d < bd) { bd = d; best = e; }
+  }
+  edgeAt.d = bd;
+  return best;
+}
+const stationDist = (s, px, py) => Math.hypot(sx(s.x) - px, sy(s.y) - py) - stationR(s);
 function routeAt(px, py) {
   let best = null, bd = 6;
   for (const r of G.routes) for (const leg of r.legs) for (const e of leg.edges) {
@@ -596,10 +659,17 @@ function endPointer(e) {
     if (s && !busy) { busy = true; (drawing ? drawClick(s) : editClick(s)).finally(() => { busy = false; }); }
     return;
   }
-  const t = trainAt(px, py);
+  const t = trainAt(px, py), tol = e.pointerType === 'touch' ? 16 : 8;
+  // 역보다 선로에 확실히 더 가까우면 선로를 고름(축소했을 때 역이 촘촘해서)
+  const ed0 = s ? edgeAt(px, py, tol) : null;
   if (t) selected = { type: 'train', t };
+  else if (ed0 && edgeAt.d < stationDist(s, px, py) - 3) selected = { type: 'track', e: ed0 };
   else if (s) selected = { type: 'station', s };
-  else { const r = routeAt(px, py); selected = r ? { type: 'route', r } : null; }
+  else {
+    const r = routeAt(px, py);
+    if (r) selected = { type: 'route', r };
+    else { const ed = edgeAt(px, py, e.pointerType === 'touch' ? 16 : 8); selected = ed ? { type: 'track', e: ed } : null; }
+  }
   renderInfo();
 }
 cv.addEventListener('pointerup', endPointer);
@@ -631,6 +701,14 @@ cv.addEventListener('pointermove', e => {
       const t = hoverTrain; txt = `${trainLabel(t)} · ${t.pax.length}/${S.tierOf(t).cap}명`;
     }
     tip.innerHTML = txt; tip.style.display = 'block'; tip.style.left = (e.offsetX + 14) + 'px'; tip.style.top = (e.offsetY + 12) + 'px';
+  } else if (!drawing && !editing) {
+    const ed = edgeAt(e.offsetX, e.offsetY);
+    if (ed) {
+      const sc = ed.secs.find(x => !S.secOwned(x)) || ed.secs[0];
+      tip.innerHTML = `<b>${esc(ed.line.name)}</b> · ${esc(S.regionName[sc.region])} 구간 ${fmt(sc.km)}km · ${S.secOwned(sc) ? '보유' : G.unlocked.has(sc.region) ? `${won(S.sectionPrice(sc))} (눌러서 사기)` : '미개방 지역'}`;
+      tip.style.display = 'block'; tip.style.left = (e.offsetX + 14) + 'px'; tip.style.top = (e.offsetY + 12) + 'px';
+      cv.style.cursor = 'pointer';
+    } else { tip.style.display = 'none'; cv.style.cursor = ''; }
   } else tip.style.display = 'none';
 });
 cv.addEventListener('wheel', e => {
