@@ -5,6 +5,30 @@ const { CFG, G, stations, edges, lines } = S;
 
 // ───────────────────────── 도우미 ─────────────────────────
 const $ = id => document.getElementById(id);
+const narrow = window.matchMedia('(max-width: 640px)'); // 폰 화면
+// 안드로이드: 이모지와 숫자가 한 글자 덩어리에 있으면 숫자까지 이모지 글꼴로 그려져 간격이 벌어짐
+// → 화면에 들어오는 글자 중 '이모지 + 숫자'가 함께 있으면 이모지만 <span class="em">으로 떼어 냄
+const EMOJI = /(\p{Extended_Pictographic}\uFE0F?)/u;
+function splitEmoji(root) {
+  const w = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+  const todo = [];
+  for (let n = w.nextNode(); n; n = w.nextNode()) {
+    const t = n.nodeValue;
+    if (/\d/.test(t) && EMOJI.test(t) && !n.parentNode.classList?.contains('em')) todo.push(n);
+  }
+  for (const n of todo) {
+    const frag = document.createDocumentFragment();
+    for (const part of n.nodeValue.split(EMOJI)) {
+      if (!part) continue;
+      if (EMOJI.test(part)) { const sp = document.createElement('span'); sp.className = 'em'; sp.textContent = part; frag.appendChild(sp); }
+      else frag.appendChild(document.createTextNode(part));
+    }
+    n.parentNode.replaceChild(frag, n);
+  }
+}
+new MutationObserver(ms => { for (const m of ms) for (const n of m.addedNodes) if (n.nodeType === 1) splitEmoji(n); else if (n.nodeType === 3 && n.parentNode) splitEmoji(n.parentNode); })
+  .observe(document.body, { childList: true, subtree: true });
+splitEmoji(document.body);
 const fmt = n => Math.round(n).toLocaleString('ko-KR');
 const won = n => {
   const a = Math.abs(n), s = n < 0 ? '-' : '';
@@ -650,7 +674,7 @@ function renderBadges() {
   $('bRegions').textContent = can || '';
 }
 function renderTop() {
-  $('day').textContent = dateTxt();
+  { const d = S.dateOf(); $('day').textContent = narrow.matches ? `${String(d.y).slice(2)}.${d.m}.${d.d}(${d.w})` : dateTxt(); }
   $('clock').textContent = hhmm(G.t);
   $('money').textContent = won(G.money);
   $('money').style.color = G.money < 0 ? '#dc2626' : '';
@@ -971,7 +995,15 @@ function focusRoute(r) { fitStations(r.stops.map(id => stations[id])); }
 
 // 속도
 const SPEEDS = [0, 1, 3, 10, 30, 100];
-function setSpeedUI() { SPEEDS.forEach((v, i) => $('sp' + i).classList.toggle('on', G.paused ? i === 0 : v === G.speed)); }
+function setSpeedUI() {
+  SPEEDS.forEach((v, i) => $('sp' + i).classList.toggle('on', G.paused ? i === 0 : v === G.speed));
+  const c = $('spCycle'); c.textContent = `${G.speed}x ▸`; c.classList.toggle('on', !G.paused);
+}
+// 폰: 속도 버튼 하나를 누를 때마다 1→3→10→30→100→1 (멈춰 있었으면 지금 속도로 다시 출발)
+$('spCycle').onclick = () => {
+  if (G.paused) { G.paused = false; setSpeedUI(); return; }
+  const k = SPEEDS.indexOf(G.speed); G.speed = SPEEDS[k + 1 < SPEEDS.length ? k + 1 : 1]; setSpeedUI();
+};
 SPEEDS.forEach((v, i) => $('sp' + i).onclick = () => { if (!v) G.paused = !G.paused; else { G.speed = v; G.paused = false; } setSpeedUI(); });
 
 // ───────────────────────── 하루 마감 ─────────────────────────

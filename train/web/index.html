@@ -109,8 +109,20 @@
   .hintbtns button { padding: 6px 12px; }
   #hint { max-width: calc(100% - 24px); }
   /* 좁은 화면(폰) */
+  #spCycle { display: none; }
+  .em { font-family: "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", sans-serif; letter-spacing: normal; }
+  /* 터치 화면: 누른 뒤 '마우스 올림' 상태가 남아 버튼 색이 바뀌지 않게 */
+  @media (hover: none) {
+    button:hover:not(:disabled) { background: #fff; border-color: #d1d5db; }
+    button.primary:hover:not(:disabled), button.on:hover:not(:disabled) { background: var(--accent); border-color: var(--accent); color: #fff; }
+    .route:hover { border-color: var(--line); } .gu:hover { background: transparent; }
+  }
   @media (max-width: 640px) {
-    #topbar { gap: 8px; padding: 0 8px; font-size: 12px; overflow-x: auto; scrollbar-width: none; }
+    #topbar { gap: 8px; padding: 0 8px; font-size: 12px; overflow: hidden; }
+    #topbar #sp1, #topbar #sp2, #topbar #sp3, #topbar #sp4, #topbar #sp5 { display: none; }
+    #topbar #sp0, #topbar #spCycle { display: inline-block; min-width: 44px; min-height: 34px; padding: 4px 8px; font-size: 14px; font-weight: 700; }
+    #topbar #spCycle { min-width: 62px; }
+    #topbar #peak, #topbar .stat:has(#clock) span.lbl { display: none; }
     #topbar .spacer { display: none; }
     #topbar .stat:has(#sat) { display: none; }
     #topbar .stat b { font-size: 13px; }
@@ -159,6 +171,7 @@
     <button id="sp3" title="10배속">10x</button>
     <button id="sp4" title="30배속">30x</button>
     <button id="sp5" title="100배속: 하루가 약 11초">100x</button>
+    <button id="spCycle" title="누를 때마다 속도 바꾸기">3x ▸</button>
   </div>
   <div id="map">
     <canvas id="cv"></canvas>

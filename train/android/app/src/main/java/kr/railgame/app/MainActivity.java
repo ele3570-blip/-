@@ -10,6 +10,8 @@ import android.webkit.WebResourceResponse;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
+import android.widget.FrameLayout;
+import android.graphics.Color;
 
 import androidx.webkit.WebViewAssetLoader;
 
@@ -21,10 +23,14 @@ public class MainActivity extends Activity {
     protected void onCreate(Bundle saved) {
         super.onCreate(saved);
         web = new WebView(this);
-        setContentView(web);
+        // WebView는 자기 padding을 무시하므로, 틀(FrameLayout)에 여백을 주고 그 안에 WebView를 넣음
+        FrameLayout root = new FrameLayout(this);
+        root.setBackgroundColor(Color.WHITE);
+        root.addView(web, new FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT));
+        setContentView(root);
 
-        // 상태 표시줄·내비게이션 바에 가려지지 않게 여백
-        web.setOnApplyWindowInsetsListener((v, insets) -> {
+        // 상태 표시줄·내비게이션 바·카메라 구멍에 가려지지 않게 여백
+        root.setOnApplyWindowInsetsListener((v, insets) -> {
             if (Build.VERSION.SDK_INT >= 30) {
                 Insets i = insets.getInsets(WindowInsets.Type.systemBars() | WindowInsets.Type.displayCutout());
                 v.setPadding(i.left, i.top, i.right, i.bottom);
