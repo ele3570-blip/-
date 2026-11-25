@@ -483,7 +483,8 @@ function renderHelp() {
     · 승객은 한 번까지 갈아탑니다(예: 대경선 → 동대구 → KTX). 요금은 탄 열차마다 냅니다<br>
     · 🚧 건설 중인 노선(충청권 광역철도, 부전–마산 등)은 추후 업데이트로 추가됩니다<br>
     · 요금은 거리 비례(일반 ${CFG.kinds.general.levels[0].fare[1]}원/km~, KTX ${CFG.kinds.ktx.levels[0].fare[1]}원/km~). 운행비는 달린 거리만큼, 고정비는 하루 단위<br>
-    · 🏦 은행: 회사 자산과 신용등급만큼 빌릴 수 있고, 하루 결산 때 이자를 냅니다. 흑자·만족도가 좋으면 등급이 올라 이자가 싸집니다<br>
+    · 결산은 한 달(30일)마다 합니다. 날짜가 넘어갈 때는 멈추지 않고, 자금 경고·강제 매각은 알림으로 알려 줍니다<br>
+    · 🏦 은행: 회사 자산과 신용등급만큼 빌릴 수 있고, 이자는 날마다 자정에 빠져나갑니다. 흑자·만족도가 좋으면 등급이 올라 이자가 싸집니다<br>
     · 자금이 마이너스인 채로 ${CFG.loan.graceDays}일을 마치면 은행이 비싼 열차부터 강제로 팔고, 그래도 모자라면 파산합니다<br>
     · 적자여도 만족도 ${CFG.psoMinSat}% 이상이면 공익서비스 보상금(적자의 ${CFG.psoRatio * 100}%)`;
 }
@@ -502,7 +503,7 @@ function renderBadges() {
   $('bRegions').textContent = can || '';
 }
 function renderTop() {
-  $('day').textContent = `${G.day}일차`;
+  $('day').textContent = dateTxt();
   $('clock').textContent = hhmm(G.t);
   $('money').textContent = won(G.money);
   $('money').style.color = G.money < 0 ? '#dc2626' : '';
@@ -512,7 +513,8 @@ function renderTop() {
   $('cover').textContent = G.today.potential ? (G.today.pax / G.today.potential * 100).toFixed(1) + '%' : '-';
   const pk = S.peakAt(G.t), el = $('peak');
   el.style.display = pk ? '' : 'none'; if (pk) el.textContent = `${pk.icon} ${pk.name} 시간`;
-  $('todayStat').textContent = `오늘 ${fmt(G.today.pax)}명 · 수입 ${won(G.today.revenue)} · 비용 ${won(G.today.cost)}`;
+  const M = G.mon, mp = M.revenue - M.opCost - M.fixed - M.interest + M.pso + G.today.revenue - G.today.cost;
+  $('todayStat').textContent = `오늘 ${fmt(G.today.pax)}명 · 이번 달 ${fmt(M.pax + G.today.pax)}명 · 이번 달 손익 ${won(mp)}`;
 }
 function refreshAll() { assignSlots(); renderPanel(); renderInfo(); renderBadges(); renderTop(); save(); }
 
@@ -817,44 +819,63 @@ $('infoClose').onclick = () => { selected = null; renderInfo(); };
 function focusRoute(r) { fitStations(r.stops.map(id => stations[id])); }
 
 // 속도
-const SPEEDS = [0, 1, 3, 10, 30];
+const SPEEDS = [0, 1, 3, 10, 30, 100];
 function setSpeedUI() { SPEEDS.forEach((v, i) => $('sp' + i).classList.toggle('on', G.paused ? i === 0 : v === G.speed)); }
 SPEEDS.forEach((v, i) => $('sp' + i).onclick = () => { if (!v) G.paused = !G.paused; else { G.speed = v; G.paused = false; } setSpeedUI(); });
 
 // ───────────────────────── 하루 마감 ─────────────────────────
+const dateTxt = (day = G.day) => { const d = S.dateOf(day); return `${d.y > 1 ? d.y + '년 ' : ''}${d.m}월 ${d.d}일`; };
+const monthTxt = dt => `${dt.y > 1 ? dt.y + '년 ' : ''}${dt.m}월`;
+// 하루 마감: 날마다 조용히 넘어가고, 달이 끝나면 월 결산을 보여 줌
 function endDay() {
-  G.paused = true;
   const R = S.closeDay();
-  const repDiff = (R.rep - R.repBefore) * 100;
-  const total = R.profit + R.pso;
+  if (R.over) {
+    G.paused = true; setSpeedUI(); save();
+    showModal(`<h2 style="margin:0 0 8px">파산</h2>
+      <p class="neg">자금이 ${CFG.loan.graceDays}일 넘게 마이너스였고, 은행이 열차를 모두 팔아도 모자랐습니다.</p>
+      <p>빚 ${won(G.debt)} · 자금 ${won(G.money)}</p>
+      <button class="primary" data-newgame="1" style="width:100%">새 게임</button>`);
+    return;
+  }
+  if (R.sold.length) toast(`🏦 은행이 열차를 강제로 팔았습니다: ${R.sold.map(x => x.label).join(', ')}`);
+  else if (R.negDays) toast(`⚠️ 자금 마이너스 ${R.negDays}일째 — ${CFG.loan.graceDays}일이면 열차 강제 매각`);
+  if (!R.monthEnd) { S.startNextDay(); refreshAll(); return; }
+  // 월 결산
+  G.paused = true; setSpeedUI();
+  const M = S.monthReport();
+  const repDiff = (M.rep - M.repStart) * 100, cash = M.money - M.moneyStart;
+  const rows = M.routes.slice(0, 8).map(x => { const p = x.rev - x.cost; return `<tr><td>${kindIcon(x.r.kind)} ${esc(S.routeTitle(x.r))} <span class="muted">${fmt(x.pax)}명</span></td><td class="${p >= 0 ? 'pos' : 'neg'}">${won(p)}</td></tr>`; }).join('');
   showModal(`
-    <h2 style="margin:0">${R.day}일차 결산</h2>
+    <h2 style="margin:0">${monthTxt(M.date)} 결산 <span class="muted" style="font-size:14px;font-weight:400">${M.days}일</span></h2>
+    <div style="max-height:62vh;overflow-y:auto">
     <table>
-      <tr><td>수송 승객</td><td>${fmt(R.pax)}명 <span class="muted">(실제 ${fmt(R.pax / CFG.demandScale)}명)</span></td></tr>
-      <tr><td>갈아탄 승객</td><td>${fmt(R.transfers)}명</td></tr>
-      <tr><td>기다리다 떠난 승객</td><td>${fmt(R.gaveUp)}명</td></tr>
-      <tr><td>만석으로 못 탄 승객</td><td class="${R.leftBehind ? 'neg' : ''}">${fmt(R.leftBehind)}명</td></tr>
-      <tr><td>수요 충족률</td><td>${R.cover.toFixed(1)}%</td></tr>
-      <tr><td>만족도</td><td>${R.sat == null ? '-' : R.sat.toFixed(0) + '%'}</td></tr>
-      <tr><td>평판 (내일 수요)</td><td>${(R.rep * 100).toFixed(0)}% <span class="${repDiff >= 0 ? 'pos' : 'neg'}">(${repDiff >= 0 ? '+' : ''}${repDiff.toFixed(1)})</span></td></tr>
+      <tr><td>수송 승객</td><td>${fmt(M.pax)}명 <span class="muted">(실제 ${fmt(M.pax / CFG.demandScale)}명)</span></td></tr>
+      <tr><td>하루 평균</td><td>${fmt(M.pax / Math.max(1, M.days))}명</td></tr>
+      <tr><td>갈아탄 승객</td><td>${fmt(M.transfers)}명</td></tr>
+      <tr><td>기다리다 떠난 승객</td><td>${fmt(M.gaveUp)}명</td></tr>
+      <tr><td>만석으로 못 탄 승객</td><td class="${M.leftBehind ? 'neg' : ''}">${fmt(M.leftBehind)}명</td></tr>
+      <tr><td>수요 충족률</td><td>${M.cover.toFixed(1)}%</td></tr>
+      <tr><td>평균 만족도</td><td>${M.sat == null ? '-' : M.sat.toFixed(0) + '%'}</td></tr>
+      <tr><td>평판 (수요 배율)</td><td>${(M.rep * 100).toFixed(0)}% <span class="${repDiff >= 0 ? 'pos' : 'neg'}">(${repDiff >= 0 ? '+' : ''}${repDiff.toFixed(1)})</span></td></tr>
       <tr><td colspan=2><hr></td></tr>
-      <tr><td>운임 수입</td><td class="pos">+${won(R.revenue)}</td></tr>
-      <tr><td>운행비 (${fmt(R.trainKm)}열차km)</td><td class="neg">-${won(R.cost - R.fixed)}</td></tr>
-      <tr><td>차량 고정비 (${G.trains.length}대)</td><td class="neg">-${won(R.fixed)}</td></tr>
-      <tr><td>역·선로·열차 구입</td><td class="muted">${won(R.bought)} (투자)</td></tr>
-      ${R.interest ? `<tr><td>대출 이자 (등급 ${R.grade}, 빚 ${won(R.debt)})</td><td class="neg">-${won(R.interest)}</td></tr>` : ''}
-      <tr><td>공익서비스 보상금</td><td class="pos">+${won(R.pso)}</td></tr>
-      <tr><td><b>순이익</b></td><td class="${total - R.interest >= 0 ? 'pos' : 'neg'}"><b>${won(total - R.interest)}</b></td></tr>
-      <tr><td>보유 자금</td><td>${won(G.money)}</td></tr>
+      <tr><td>운임 수입</td><td class="pos">+${won(M.revenue)}</td></tr>
+      <tr><td>운행비 (${fmt(M.trainKm)}열차km)</td><td class="neg">-${won(M.opCost)}</td></tr>
+      <tr><td>차량 고정비</td><td class="neg">-${won(M.fixed)}</td></tr>
+      ${M.interest ? `<tr><td>대출 이자</td><td class="neg">-${won(M.interest)}</td></tr>` : ''}
+      <tr><td>공익서비스 보상금</td><td class="pos">+${won(M.pso)}</td></tr>
+      <tr><td><b>영업 순이익</b></td><td class="${M.profit >= 0 ? 'pos' : 'neg'}"><b>${won(M.profit)}</b></td></tr>
+      <tr><td>투자 (지역·역·선로·열차·개량)</td><td class="muted">${won(M.bought)}</td></tr>
+      <tr><td>보유 자금</td><td>${won(M.money)} <span class="${cash >= 0 ? 'pos' : 'neg'}">(${cash >= 0 ? '+' : ''}${won(cash)})</span></td></tr>
+      ${M.debt || M.debtStart ? `<tr><td>은행 빚 (등급 ${M.grade})</td><td>${won(M.debt)}</td></tr>` : ''}
+      ${rows ? `<tr><td colspan=2><hr></td></tr><tr><td colspan=2><b>노선별 이달 손익</b> <span class="muted">(운임 − 운행비)</span></td></tr>${rows}` : ''}
     </table>
-    ${R.leftBehind > 50 ? '<p class="muted">만석으로 못 탄 승객이 많았습니다. 붐비는 노선에 열차를 더 넣거나 등급을 올리세요.</p>' : ''}
-    ${R.gaveUp > R.pax * 0.3 ? '<p class="muted">기다리다 떠난 승객이 많습니다. 배차 간격을 줄이세요.</p>' : ''}
-    ${R.negDays ? `<p class="neg">⚠️ 자금이 마이너스로 끝났습니다 (${R.negDays}일째). ${CFG.loan.graceDays}일이 되면 은행이 열차를 강제로 팝니다. 🏦 은행에서 빌리거나 적자 노선을 줄이세요.</p>` : ''}
-    ${R.sold.length ? `<p class="neg">🏦 은행이 열차를 강제로 팔았습니다: ${R.sold.map(x => `${esc(x.label)} (${won(x.value)})`).join(', ')}</p>` : ''}
-    ${R.over ? `<p class="neg"><b>파산했습니다.</b> 팔 열차가 없어 빚과 적자를 감당할 수 없습니다.</p><button class="primary" data-newgame="1" style="width:100%">새 게임</button>`
-      : `<button class="primary" id="nextDay" style="width:100%">${R.day + 1}일차 시작</button>`}`);
-  if (R.over) { save(); return; }
-  $('nextDay').onclick = () => { hideModal(); S.startNextDay(); G.paused = false; setSpeedUI(); refreshAll(); };
+    ${M.sold.length ? `<p class="neg">🏦 이달 강제 매각: ${M.sold.map(x => `${esc(x.label)} (${won(x.value)})`).join(', ')}</p>` : ''}
+    ${M.leftBehind > M.pax * 0.05 ? '<p class="muted">만석으로 못 탄 승객이 많았습니다. 붐비는 노선에 열차를 더 넣거나 등급을 올리세요.</p>' : ''}
+    ${M.gaveUp > M.pax * 0.3 ? '<p class="muted">기다리다 떠난 승객이 많습니다. 배차 간격을 줄이세요.</p>' : ''}
+    </div>
+    <button class="primary" id="nextDay" style="width:100%;margin-top:10px">${monthTxt(S.dateOf(G.day + 1))} 시작</button>`);
+  $('nextDay').onclick = () => { hideModal(); S.startNextDay(); S.startMonth(); G.paused = false; setSpeedUI(); refreshAll(); };
+  save();
 }
 
 // ───────────────────────── 저장 ─────────────────────────
@@ -899,7 +920,7 @@ if (!loaded) {
     <p style="line-height:1.7">첫 노선을 만들어 보세요. 🛤️ 노선 → 🚃 새 일반열차 → 동대구와 다른 역을 차례로 누르면, 아직 안 산 역은 그 자리에서 살 수 있습니다. 그다음 노선 카드에서 무궁화호를 배차합니다.</p>
     <p style="line-height:1.7">역을 눌러 사람들이 어디로 가고 싶은지 보세요. 대구 사람들은 대부분 서울·부산으로 갑니다.</p>
     <p style="line-height:1.7">넓히는 순서: 🗺️ <b>지역 열기</b> → 🔧 <b>선로 구간 사기</b> → <b>역 사기</b> → 노선 만들기. 노선을 그리다 안 산 역이나 구간을 누르면 바로 살 수 있습니다. 승객은 한 번까지 갈아탑니다.</p>
-    <p class="muted">수요: 한국철도공사 역별 승하차(2025)를 하루 평균으로 나눈 값. 진행은 브라우저에 하루 단위로 저장됩니다.</p>
+    <p class="muted">수요: 한국철도공사 역별 승하차(2025)를 하루 평균으로 나눈 값. 결산은 한 달(30일)마다 하고, 진행은 브라우저에 하루 단위로 저장됩니다.</p>
     <button class="primary" id="startBtn" style="width:100%">시작</button>`);
   $('startBtn').onclick = () => { hideModal(); G.paused = false; setSpeedUI(); save(); };
 }
