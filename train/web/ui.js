@@ -151,7 +151,35 @@ function edgeVisible(e) {
 
 // ───────────────────────── 그리기 ─────────────────────────
 let hoverStation = null, hoverTrain = null, selected = null, drawing = null, editing = null, mouse = { x: 0, y: 0 };
-const stationR = s => Math.max(2.5, Math.min(11, 2 + Math.sqrt(s.on) / 14)) * Math.min(1.6, Math.max(0.7, Math.sqrt(cam.z / 3)));
+// 역 규모 5단계(실제 하루 승차): 점 → 동그라미 → 두 줄 동그라미 → 네모 → 두 줄 네모. r = 반지름(네모는 한 변의 절반)
+const STATION_TIERS = [
+  { min: 0, name: '간이역', shape: 'dot', r: 3 },
+  { min: 200, name: '소형역', shape: 'circle', r: 5 },
+  { min: 1000, name: '중형역', shape: 'circle2', r: 7 },
+  { min: 4000, name: '대형역', shape: 'square', r: 8 },
+  { min: 12000, name: '초대형역', shape: 'square2', r: 10.5 },
+];
+const tierOfStation = s => { let t = STATION_TIERS[0]; for (const x of STATION_TIERS) if (s.on >= x.min) t = x; return t; };
+const zoomMul = () => Math.min(1.6, Math.max(0.7, Math.sqrt(cam.z / 3)));
+const stationR = s => tierOfStation(s).r * zoomMul();
+// 역 모양 경로: 동그라미 또는 모서리 둥근 네모
+function stationPath(shape, X, Y, r) {
+  ctx.beginPath();
+  if (shape === 'square' || shape === 'square2') ctx.roundRect(X - r, Y - r, r * 2, r * 2, r * 0.3);
+  else ctx.arc(X, Y, r, 0, Math.PI * 2);
+}
+// 역 그리기: fill·stroke·선 굵기·점선은 상태(미개방·미보유·정차역·선택)에 따라
+function drawStation(s, X, Y, fill, stroke, lw, dash) {
+  const t = tierOfStation(s), r = t.r * zoomMul();
+  stationPath(t.shape, X, Y, r);
+  ctx.fillStyle = fill; ctx.fill();
+  ctx.setLineDash(dash); ctx.lineWidth = lw; ctx.strokeStyle = stroke; ctx.stroke();
+  if (t.shape === 'circle2' || t.shape === 'square2') { // 안쪽 두 번째 줄
+    stationPath(t.shape, X, Y, r * 0.5);
+    ctx.setLineDash([]); ctx.lineWidth = Math.max(1, lw * 0.7); ctx.stroke();
+  }
+  ctx.setLineDash([]);
+}
 
 function trainPos(t) {
   const r = t.route, { j } = S.nextIdx(t);
@@ -310,13 +338,11 @@ function draw() {
     if (X < -40 || Y < -40 || X > W + 40 || Y > H + 40) continue;
     const rad = stationR(s);
     const served = S.servedBy.has(s.id), own = S.stOwned(s);
-    ctx.beginPath(); ctx.arc(X, Y, rad, 0, Math.PI * 2);
-    ctx.fillStyle = !open ? '#e5e7eb' : stopSet.has(s.id) ? '#fde68a' : own ? '#ffffff' : '#f1f5f9';
-    ctx.fill();
-    ctx.setLineDash(open && !own ? [2, 2] : []);
-    ctx.lineWidth = s === hoverStation || selected?.s === s ? 3 : served ? 2 : 1.3;
-    ctx.strokeStyle = !open ? '#9ca3af' : s === hoverStation ? '#2563eb' : '#1f2937';
-    ctx.stroke(); ctx.setLineDash([]);
+    drawStation(s, X, Y,
+      !open ? '#e5e7eb' : stopSet.has(s.id) ? '#fde68a' : own ? '#ffffff' : '#f1f5f9',
+      !open ? '#9ca3af' : s === hoverStation ? '#2563eb' : '#1f2937',
+      s === hoverStation || selected?.s === s ? 3 : served ? 2 : 1.3,
+      open && !own ? [2, 2] : []);
     if (showAll || s.on > 6000 / Math.max(0.4, cam.z) || s === hoverStation || stopSet.has(s.id)) labels.push({ s, X, Y, rad, open });
   }
   ctx.font = '600 12px "Pretendard","Apple SD Gothic Neo","Noto Sans KR",sans-serif';
@@ -371,7 +397,7 @@ function stationHtml(s) {
   const open = S.isOpen(s), q = G.waiting.get(s.id) || [];
   const rs = S.servedBy.get(s.id) || [];
   const T = S.destTable.get(s.id);
-  let h = `<div><b style="font-size:15px">${esc(s.name)}역</b> <span class="tag gray">${esc(S.regionName[s.region])}</span> ${open ? '' : '<span class="tag warn">미개방</span>'}</div>
+  let h = `<div><b style="font-size:15px">${esc(s.name)}역</b> <span class="tag">${tierOfStation(s).name}</span> <span class="tag gray">${esc(S.regionName[s.region])}</span> ${open ? '' : '<span class="tag warn">미개방</span>'}</div>
     <div class="muted">${esc(s.si)} · 실제 하루 승차 ${fmt(s.on)}명 · 하차 ${fmt(s.off)}명${s.ktx ? ` · KTX ${Math.round(s.ktx * 100)}%` : ''}</div>`;
   if (open && !S.stOwned(s)) h += `<div style="margin-top:6px"><button class="primary" data-buyst="${s.id}" ${G.money < S.stationPrice(s) ? 'disabled' : ''}>🏷 역 사기 ${won(S.stationPrice(s))}</button> <span class="muted">사야 열차를 세울 수 있습니다</span></div>`;
   if (open) {
@@ -647,7 +673,7 @@ function renderHelp() {
     · 🚄 고속열차: KTX-이음 → KTX-산천 → KTX-청룡. 고속선과 전철화된 일반선<br>
     · 선로 색: 파랑 = 고속선(KTX만), 초록 = 전철 일반선, 갈색 점선 = 비전철 일반선(무궁화·새마을만). 노선을 누르면 지나는 선로 종류가 색 띠와 km로 나옵니다<br>
     · 선로마다 시간당 다닐 수 있는 열차 수가 정해져 있습니다(단선 ${CFG.capSingle} · 복선 ${CFG.capDouble} · 고속선 ${CFG.capHs}). 넘치면 빨갛게 표시되고 느려집니다<br>
-    · 역 크기 = 실제 하루 승차 인원(2025, 코레일). 게임 승객 1명 = 실제 ${Math.round(1 / CFG.demandScale)}명<br>
+    · 역 모양 = 실제 하루 승차 인원(2025, 코레일): 점 간이역(200명 미만) · 동그라미 소형(200~) · 두 줄 동그라미 중형(1,000~) · 네모 대형(4,000~) · 두 줄 네모 초대형(12,000~). 게임 승객 1명 = 실제 ${Math.round(1 / CFG.demandScale)}명<br>
     · 역을 누르면 그 역 사람들이 가고 싶은 곳이 나옵니다. 아직 안 열린 지역으로 가려는 사람이 많으면 지역을 여세요<br>
     · 열차가 더 필요한지: 노선 카드 맨 위 판정을 보세요. 🔴 만석 = 열차 추가나 큰 등급, 🟠 배차 간격이 김 = 열차 추가, 🟡 남음 = 1대 빼도 됨, 🟢 적당<br>
     · 빠를수록(자동차보다), 자주 다닐수록 승객이 늘고, 오래 기다리면 떠납니다<br>
@@ -673,6 +699,17 @@ function renderBadges() {
   const can = S.D.regions.filter(r => !G.unlocked.has(r.id) && S.regionReachable(r.id) && G.money >= CFG.unlockCost[r.id]).length;
   $('bRegions').textContent = can || '';
 }
+// 지도 범례 두 번째 줄: 역 규모 모양
+(function stationLegend() {
+  const svg = t => {
+    const r = t.r * 0.8, c = 11, sq = t.shape.startsWith('square');
+    const one = k => sq ? `<rect x="${c - r * k}" y="${c - r * k}" width="${2 * r * k}" height="${2 * r * k}" rx="${r * k * 0.3}"/>` : `<circle cx="${c}" cy="${c}" r="${r * k}"/>`;
+    return `<svg width="22" height="22" viewBox="0 0 22 22" fill="#fff" stroke="#1f2937" stroke-width="1.3">${one(1)}${t.shape.endsWith('2') ? one(0.5) : ''}</svg>`;
+  };
+  const row = document.createElement('div'); row.className = 'lgrow';
+  row.innerHTML = STATION_TIERS.map(t => `<span title="하루 승차 ${t.min.toLocaleString()}명 이상">${svg(t)}${t.name.replace('역', '')}</span>`).join('');
+  $('legend').appendChild(row);
+})();
 function renderTop() {
   { const d = S.dateOf(); $('day').textContent = narrow.matches ? `${String(d.y).slice(2)}.${d.m}.${d.d}(${d.w})` : dateTxt(); }
   $('clock').textContent = hhmm(G.t);

@@ -144,11 +144,13 @@
   .grade.A { background: #15803d; } .grade.B { background: #2563eb; } .grade.C { background: #d97706; } .grade.D { background: #dc2626; }
   .bankbtns { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; margin-bottom: 8px; }
   .bankbtns button { padding: 7px 4px; }
-  #legend { position: absolute; left: 12px; top: 12px; display: flex; gap: 10px; background: rgba(255,255,255,.9); border: 1px solid var(--line); border-radius: 8px; padding: 4px 9px; font-size: 12px; color: #374151; pointer-events: none; }
+  #legend { position: absolute; left: 12px; top: 12px; display: flex; flex-direction: column; gap: 2px; background: rgba(255,255,255,.9); border: 1px solid var(--line); border-radius: 8px; padding: 4px 9px; font-size: 12px; color: #374151; pointer-events: none; }
+  #legend .lgrow { display: flex; gap: 10px; flex-wrap: wrap; }
+  #legend svg { flex: none; }
   #legend span { display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; }
   #legend i { display: inline-block; width: 16px; height: 4px; border-radius: 2px; }
   #legend i.dash { background: repeating-linear-gradient(90deg, #a16207 0 5px, transparent 5px 8px); }
-  @media (max-width: 640px) { #legend { top: auto; bottom: 74px; left: 8px; font-size: 11px; gap: 6px; } }
+  @media (max-width: 640px) { #legend { top: auto; bottom: 74px; left: 8px; right: 8px; font-size: 11px; } #legend .lgrow { gap: 6px; } }
   .stops span.pass { color: var(--muted); border-style: dashed; }
 </style>
 </head>
@@ -176,7 +178,7 @@
   <div id="map">
     <canvas id="cv"></canvas>
     <div id="hint"></div>
-    <div id="legend" title="선로 종류"><span><i style="background:#2563eb"></i>고속선</span><span><i style="background:#15803d"></i>전철 일반선</span><span><i class="dash"></i>비전철</span></div>
+    <div id="legend" title="선로 종류·역 규모"><div class="lgrow"><span><i style="background:#2563eb"></i>고속선</span><span><i style="background:#15803d"></i>전철 일반선</span><span><i class="dash"></i>비전철</span></div></div>
     <div id="tooltip"></div>
     <div id="toast"></div>
     <div id="attr">선로 © <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a> 기여자 · 경계 © 통계청(southkorea-maps) · 역 좌표 위키데이터 · 승하차 한국철도공사(2025)</div>
