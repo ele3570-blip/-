@@ -1109,6 +1109,9 @@ function load() {
 
 // ───────────────────────── 루프 ─────────────────────────
 let last = performance.now(), uiTimer = 0;
+const touchedAt = new WeakMap();
+for (const id of ['infoCard', 'panel']) $(id).addEventListener('pointerdown', () => touchedAt.set($(id), performance.now()), true);
+const busyEl = el => el.matches(':hover') || performance.now() - (touchedAt.get(el) || -1e9) < 2000;
 function frame(now) {
   const dtReal = Math.min(0.1, (now - last) / 1000);
   last = now;
@@ -1122,7 +1125,8 @@ function frame(now) {
   }
   draw();
   uiTimer += dtReal;
-  if (uiTimer > 0.3) { uiTimer = 0; renderTop(); if (selected && !$('info').matches(':hover')) renderInfo(); if (openPanelName === 'routes' && !$('panel').matches(':hover')) renderRoutes(); }
+  // 카드·패널을 만지는 중(마우스를 올렸거나, 누른 지 2초 안)에는 다시 그리지 않음: 누르던 버튼이 바뀌어 눌림이 사라지지 않게
+  if (uiTimer > 0.3) { uiTimer = 0; renderTop(); if (selected && !busyEl($('infoCard'))) renderInfo(); if (openPanelName === 'routes' && !busyEl($('panel'))) renderRoutes(); }
   requestAnimationFrame(frame);
 }
 
