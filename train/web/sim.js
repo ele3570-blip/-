@@ -50,7 +50,7 @@ const CFG = {
   repStart: 1.0, repMin: 0.6, repMax: 1.4, repSpeed: 0.35,
   psoMinSat: 60, psoRatio: 0.5,    // 공익서비스 보상: 적자라도 만족도가 높으면 적자의 50%
   dayStartMin: 5 * 60, dayEndMin: 24 * 60,
-  monthDays: 30, // 결산 주기(한 달 = 30일, 1년 = 12달)
+  startDate: [2026, 1, 1], // 1일째 = 2026년 1월 1일. 실제 달력(달마다 28~31일), 달이 끝나면 월 결산
   // 은행 대출. 한도 = (기본 + 자산 × 비율) × 등급 배율, 이자는 하루 결산 때 남은 빚 × 하루 이자율
   loan: {
     base: 30_000_000, assetRatio: 0.5, step: 10_000_000,
@@ -141,12 +141,14 @@ const G = {
 };
 function newToday() { return { interest: 0, pax: 0, transfers: 0, revenue: 0, cost: 0, potential: 0, spawned: 0, satSum: 0, satN: 0, gaveUp: 0, leftBehind: 0, trainKm: 0, bought: 0 }; }
 G.today = newToday();
-// 달력: 한 달 30일, 1년 12달
+// 달력: 실제 달력. day 1 = CFG.startDate
+const WEEK = '일월화수목금토';
 function dateOf(day = G.day) {
-  const n = day - 1, md = CFG.monthDays;
-  return { y: Math.floor(n / (md * 12)) + 1, m: Math.floor(n / md) % 12 + 1, d: n % md + 1 };
+  const [y0, m0, d0] = CFG.startDate;
+  const t = new Date(Date.UTC(y0, m0 - 1, d0 + day - 1));
+  return { y: t.getUTCFullYear(), m: t.getUTCMonth() + 1, d: t.getUTCDate(), w: WEEK[t.getUTCDay()] };
 }
-const isMonthEnd = (day = G.day) => day % CFG.monthDays === 0;
+const isMonthEnd = (day = G.day) => dateOf(day + 1).d === 1;
 function newMonth() {
   return { startDay: G.day, days: 0, pax: 0, transfers: 0, gaveUp: 0, leftBehind: 0, potential: 0, revenue: 0, opCost: 0, fixed: 0,
     interest: 0, pso: 0, bought: 0, trainKm: 0, satSum: 0, satDays: 0, repStart: G.rep, moneyStart: G.money, debtStart: G.debt, sold: [], negMax: 0 };

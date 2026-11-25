@@ -483,7 +483,7 @@ function renderHelp() {
     · 승객은 한 번까지 갈아탑니다(예: 대경선 → 동대구 → KTX). 요금은 탄 열차마다 냅니다<br>
     · 🚧 건설 중인 노선(충청권 광역철도, 부전–마산 등)은 추후 업데이트로 추가됩니다<br>
     · 요금은 거리 비례(일반 ${CFG.kinds.general.levels[0].fare[1]}원/km~, KTX ${CFG.kinds.ktx.levels[0].fare[1]}원/km~). 운행비는 달린 거리만큼, 고정비는 하루 단위<br>
-    · 결산은 한 달(30일)마다 합니다. 날짜가 넘어갈 때는 멈추지 않고, 자금 경고·강제 매각은 알림으로 알려 줍니다<br>
+    · 결산은 달이 끝날 때마다(실제 달력, 2026년 1월부터) 합니다. 날짜가 넘어갈 때는 멈추지 않고, 자금 경고·강제 매각은 알림으로 알려 줍니다<br>
     · 🏦 은행: 회사 자산과 신용등급만큼 빌릴 수 있고, 이자는 날마다 자정에 빠져나갑니다. 흑자·만족도가 좋으면 등급이 올라 이자가 싸집니다<br>
     · 자금이 마이너스인 채로 ${CFG.loan.graceDays}일을 마치면 은행이 비싼 열차부터 강제로 팔고, 그래도 모자라면 파산합니다<br>
     · 적자여도 만족도 ${CFG.psoMinSat}% 이상이면 공익서비스 보상금(적자의 ${CFG.psoRatio * 100}%)`;
@@ -824,8 +824,8 @@ function setSpeedUI() { SPEEDS.forEach((v, i) => $('sp' + i).classList.toggle('o
 SPEEDS.forEach((v, i) => $('sp' + i).onclick = () => { if (!v) G.paused = !G.paused; else { G.speed = v; G.paused = false; } setSpeedUI(); });
 
 // ───────────────────────── 하루 마감 ─────────────────────────
-const dateTxt = (day = G.day) => { const d = S.dateOf(day); return `${d.y > 1 ? d.y + '년 ' : ''}${d.m}월 ${d.d}일`; };
-const monthTxt = dt => `${dt.y > 1 ? dt.y + '년 ' : ''}${dt.m}월`;
+const dateTxt = (day = G.day) => { const d = S.dateOf(day); return `${d.y}년 ${d.m}월 ${d.d}일 (${d.w})`; };
+const monthTxt = dt => `${dt.y}년 ${dt.m}월`;
 // 하루 마감: 날마다 조용히 넘어가고, 달이 끝나면 월 결산을 보여 줌
 function endDay() {
   const R = S.closeDay();
@@ -920,7 +920,7 @@ if (!loaded) {
     <p style="line-height:1.7">첫 노선을 만들어 보세요. 🛤️ 노선 → 🚃 새 일반열차 → 동대구와 다른 역을 차례로 누르면, 아직 안 산 역은 그 자리에서 살 수 있습니다. 그다음 노선 카드에서 무궁화호를 배차합니다.</p>
     <p style="line-height:1.7">역을 눌러 사람들이 어디로 가고 싶은지 보세요. 대구 사람들은 대부분 서울·부산으로 갑니다.</p>
     <p style="line-height:1.7">넓히는 순서: 🗺️ <b>지역 열기</b> → 🔧 <b>선로 구간 사기</b> → <b>역 사기</b> → 노선 만들기. 노선을 그리다 안 산 역이나 구간을 누르면 바로 살 수 있습니다. 승객은 한 번까지 갈아탑니다.</p>
-    <p class="muted">수요: 한국철도공사 역별 승하차(2025)를 하루 평균으로 나눈 값. 결산은 한 달(30일)마다 하고, 진행은 브라우저에 하루 단위로 저장됩니다.</p>
+    <p class="muted">수요: 한국철도공사 역별 승하차(2025)를 하루 평균으로 나눈 값. 2026년 1월 1일부터 시작해 달이 끝날 때마다 결산하고, 진행은 브라우저에 하루 단위로 저장됩니다.</p>
     <button class="primary" id="startBtn" style="width:100%">시작</button>`);
   $('startBtn').onclick = () => { hideModal(); G.paused = false; setSpeedUI(); save(); };
 }
