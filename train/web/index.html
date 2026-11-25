@@ -105,6 +105,27 @@
   .line .btns button { padding: 2px 7px; font-size: 12px; }
   .stops { display: flex; flex-wrap: wrap; gap: 3px; margin: 4px 0; }
   .stops span { background: #f8fafc; border: 1px solid var(--line); border-radius: 999px; padding: 0 7px; font-size: 12px; }
+  .hintbtns { display: flex; gap: 6px; justify-content: flex-end; margin-top: 6px; }
+  .hintbtns button { padding: 6px 12px; }
+  #hint { max-width: calc(100% - 24px); }
+  /* 좁은 화면(폰) */
+  @media (max-width: 640px) {
+    #topbar { gap: 8px; padding: 0 8px; font-size: 12px; overflow-x: auto; scrollbar-width: none; }
+    #topbar .spacer { display: none; }
+    #topbar .stat:nth-child(4) { display: none; }
+    #topbar .stat b { font-size: 13px; }
+    #topbar #todayStat, #topbar .stat.wide { display: none; }
+    #topbar button { padding: 4px 6px; font-size: 12px; }
+    #dock { left: 8px; right: 8px; bottom: 8px; transform: none; padding: 4px; gap: 2px; justify-content: space-between; }
+    #dock button { flex: 1; flex-direction: column; gap: 1px; padding: 6px 2px; font-size: 11px; position: relative; }
+    #dock .badge { position: absolute; top: -6px; right: 0; min-width: 16px; height: 16px; font-size: 10px; }
+    #panel { top: 8px; left: 8px; right: 8px; width: auto; bottom: 70px; }
+    #infoCard { left: 8px; right: 8px; width: auto; bottom: 70px; max-height: 45%; }
+    #toast { bottom: 76px !important; max-width: calc(100% - 24px); }
+    #hint { top: 8px; font-size: 12px; width: calc(100% - 16px); }
+    #attr { display: none; }
+    #modal .box { min-width: 0; width: calc(100% - 24px); padding: 16px; }
+  }
   .stops span.pass { color: var(--muted); border-style: dashed; }
 </style>
 </head>
@@ -115,8 +136,8 @@
     <span class="stat">🕐 <b id="clock">05:00</b></span>
     <span class="stat">💰 <b id="money">0</b></span>
     <span class="stat">😊 만족도 <b id="sat">-</b></span>
-    <span class="stat" title="만족도에 따라 매일 변하고, 다음 날 수요에 곱해집니다">⭐ 평판 <b id="rep">100%</b></span>
-    <span class="stat" title="열린 지역 역들의 전체 수요 중 오늘 실제로 태운 비율">🧍 수요 충족 <b id="cover">-</b></span>
+    <span class="stat wide" title="만족도에 따라 매일 변하고, 다음 날 수요에 곱해집니다">⭐ 평판 <b id="rep">100%</b></span>
+    <span class="stat wide" title="열린 지역 역들의 전체 수요 중 오늘 실제로 태운 비율">🧍 수요 충족 <b id="cover">-</b></span>
     <span class="stat" id="peak" style="display:none;background:#fef3c7;color:#92400e;padding:3px 9px;border-radius:999px;font-weight:700"></span>
     <span class="stat muted" id="todayStat"></span>
     <span class="spacer"></span>

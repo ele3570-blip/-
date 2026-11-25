@@ -18,6 +18,15 @@ let toastTimer;
 function toast(msg, bg = '#b91c1c') { const t = $('toast'); t.textContent = msg; t.style.background = bg; t.style.display = 'block'; clearTimeout(toastTimer); toastTimer = setTimeout(() => t.style.display = 'none', 2400); }
 function showModal(html) { $('modalBox').innerHTML = html; $('modal').style.display = 'flex'; }
 function hideModal() { $('modal').style.display = 'none'; }
+// 확인창(브라우저 confirm 대신: 임베드된 페이지에서는 confirm이 막힘). Promise<boolean>
+function ask(msg, yes = '확인') {
+  return new Promise(res => {
+    showModal(`<p style="white-space:pre-line;line-height:1.7;margin:0 0 16px">${esc(msg)}</p>
+      <div style="display:flex;gap:8px"><button id="askNo" style="flex:1">취소</button><button class="primary" id="askYes" style="flex:1">${esc(yes)}</button></div>`);
+    $('askYes').onclick = () => { hideModal(); res(true); };
+    $('askNo').onclick = () => { hideModal(); res(false); };
+  });
+}
 function check(res, okMsg) { if (res && res.err) { toast(res.err); return false; } if (okMsg) toast(okMsg, '#15803d'); refreshAll(); return true; }
 const kindIcon = k => CFG.kinds[k].icon;
 const trainLabel = t => `${kindIcon(t.kind)} ${t.id}호 ${S.tierOf(t).name}`;
@@ -437,34 +446,36 @@ function startDrawing(kind) {
   cancelEdit();
   drawing = { kind, stops: [], legs: [] };
   cv.classList.add('drawing'); hidePanelForMap(); selected = null; renderInfo();
-  setHint(`${kindIcon(kind)} <b>새 ${CFG.kinds[kind].name} 노선</b>: 정차할 역을 순서대로 누르세요 · Enter 완료 · Backspace 되돌리기 · Esc 취소`);
+  setHint(`${kindIcon(kind)} <b>새 ${CFG.kinds[kind].name} 노선</b>: 정차할 역을 순서대로 누르세요
+    <div class="hintbtns"><button data-draw="undo" title="Backspace">↩ 되돌리기</button><button data-draw="cancel" title="Esc">취소</button><button class="primary" data-draw="done" title="Enter">완료</button></div>`);
 }
 // 안 산 역이면 살지 묻고 삼. 샀으면 true
-function ensureStation(s) {
+async function ensureStation(s) {
   if (S.stOwned(s)) return true;
   if (!S.isOpen(s)) { toast('아직 열지 않은 지역의 역입니다'); return false; }
   const c = S.stationPrice(s);
-  if (!confirm(`${s.name}역은 아직 사지 않았습니다.\n${won(c)}에 사서 정차역으로 넣을까요?`)) return false;
+  if (!await ask(`${s.name}역은 아직 사지 않았습니다.\n${won(c)}에 사서 정차역으로 넣을까요?`, `${won(c)}에 사기`)) return false;
   return check(S.buyStation(s), `${s.name}역을 샀습니다`);
 }
 // a → b 길: 산 선로로 안 이어지면 필요한 구간을 사겠냐고 물음
-function pathOrBuy(a, b, kind) {
+async function pathOrBuy(a, b, kind) {
   let P = S.findPath(a, b, kind);
   if (P) return P;
   const Q = S.findPath(a, b, kind, true);
   if (!Q) { toast(`${CFG.kinds[kind].name}이(가) 다닐 수 있는 선로로 이어지지 않습니다 (열린 지역·전철화 확인)`); return null; }
   const need = S.missingSections(Q), total = need.reduce((x, sc) => x + S.sectionPrice(sc), 0);
-  if (!confirm(`이 구간 선로를 아직 사지 않았습니다.\n${need.map(sc => `· ${sc.line.name} ${S.regionName[sc.region]} 구간 ${fmt(sc.km)}km  ${won(S.sectionPrice(sc))}`).join('\n')}\n\n모두 ${won(total)}에 살까요?`)) return null;
+  if (!await ask(`이 구간 선로를 아직 사지 않았습니다.\n${need.map(sc => `· ${sc.line.name} ${S.regionName[sc.region]} 구간 ${fmt(sc.km)}km  ${won(S.sectionPrice(sc))}`).join('\n')}\n\n모두 ${won(total)}에 살까요?`, `${won(total)}에 사기`)) return null;
   if (!check(S.buySections(need), '선로 구간을 샀습니다')) return null;
   return S.findPath(a, b, kind);
 }
-function drawClick(s) {
+let busy = false; // 확인창을 기다리는 중에는 다른 클릭 무시
+async function drawClick(s) {
   const st = drawing.stops;
   if (st.includes(s.id)) return toast('이미 넣은 역입니다');
-  if (!ensureStation(s)) return;
+  if (!await ensureStation(s) || !drawing) return;
   if (st.length) {
-    const P = pathOrBuy(st[st.length - 1], s.id, drawing.kind);
-    if (!P) return;
+    const P = await pathOrBuy(st[st.length - 1], s.id, drawing.kind);
+    if (!P || !drawing) return;
     drawing.legs.push(P);
   }
   st.push(s.id);
@@ -485,15 +496,16 @@ function startEdit(r) {
   cancelDrawing();
   editing = { r, kind: r.kind, stops: r.stops.slice(), legs: r.legs.slice() };
   cv.classList.add('drawing'); hidePanelForMap();
-  setHint(`✏️ <b>${esc(S.routeTitle(r))}</b> 정차역 수정: 정차역 누르면 빼기 · 다른 역 누르면 넣기 · Enter 적용 · Esc 취소`);
+  setHint(`✏️ <b>${esc(S.routeTitle(r))}</b> 정차역 수정: 정차역 누르면 빼기 · 다른 역 누르면 넣기
+    <div class="hintbtns"><button data-draw="cancel" title="Esc">취소</button><button class="primary" data-draw="done" title="Enter">적용</button></div>`);
 }
-function editClick(s) {
+async function editClick(s) {
   const st = editing.stops, k = st.indexOf(s.id);
   if (k >= 0) {
     if (st.length <= 2) return toast('정차역은 2개 이상이어야 합니다');
     st.splice(k, 1);
   } else {
-    if (!ensureStation(s)) return;
+    if (!await ensureStation(s) || !editing) return;
     // 가장 덜 돌아가는 자리에 끼워 넣기
     let best = null;
     for (let i = 0; i <= st.length; i++) {
@@ -543,30 +555,65 @@ function routeAt(px, py) {
   }
   return best;
 }
+// 마우스·터치 공통(포인터). 한 손가락/마우스 = 끌어서 이동·누르기, 두 손가락 = 확대·축소
 let drag = null;
-cv.addEventListener('mousedown', e => { drag = { x: e.offsetX, y: e.offsetY, cx: cam.x, cy: cam.y, moved: false }; cv.style.cursor = 'grabbing'; });
-window.addEventListener('mouseup', e => {
+const pointers = new Map(); // pointerId → {x, y}
+let pinch = null;
+const localXY = e => { const r = cv.getBoundingClientRect(); return [e.clientX - r.left, e.clientY - r.top]; };
+cv.style.touchAction = 'none';
+cv.addEventListener('pointerdown', e => {
+  const [x, y] = localXY(e);
+  pointers.set(e.pointerId, { x, y });
+  cv.setPointerCapture?.(e.pointerId);
+  if (pointers.size === 2) {
+    const [p1, p2] = [...pointers.values()];
+    pinch = { d: Math.hypot(p1.x - p2.x, p1.y - p2.y), z: cam.z, mx: (p1.x + p2.x) / 2, my: (p1.y + p2.y) / 2, wx: wx((p1.x + p2.x) / 2), wy: wy((p1.y + p2.y) / 2) };
+    drag = null;
+  } else if (pointers.size === 1) { drag = { x, y, cx: cam.x, cy: cam.y, moved: false }; cv.style.cursor = 'grabbing'; }
+});
+cv.addEventListener('pointermove', e => {
+  if (!pointers.has(e.pointerId)) return;
+  const [x, y] = localXY(e);
+  pointers.set(e.pointerId, { x, y });
+  if (pinch && pointers.size >= 2) {
+    const [p1, p2] = [...pointers.values()];
+    const d = Math.hypot(p1.x - p2.x, p1.y - p2.y), mx = (p1.x + p2.x) / 2, my = (p1.y + p2.y) / 2;
+    cam.z = Math.max(0.5, Math.min(60, pinch.z * d / (pinch.d || 1)));
+    cam.x = pinch.wx - (mx - W / 2) / cam.z; cam.y = pinch.wy - (my - H / 2) / cam.z;
+  }
+});
+function endPointer(e) {
+  if (!pointers.has(e.pointerId)) return;
+  pointers.delete(e.pointerId);
+  if (pinch) { if (pointers.size < 2) pinch = null; drag = null; return; }
   cv.style.cursor = '';
   if (!drag) return;
   const d = drag; drag = null;
-  if (d.moved) return;
-  const px = e.clientX - cv.getBoundingClientRect().left, py = e.clientY - cv.getBoundingClientRect().top;
+  if (d.moved || e.type === 'pointercancel') return;
+  const [px, py] = localXY(e);
   const s = stationAt(px, py);
-  if (drawing) { if (s) drawClick(s); return; }
-  if (editing) { if (s) editClick(s); return; }
+  if (drawing || editing) {
+    if (s && !busy) { busy = true; (drawing ? drawClick(s) : editClick(s)).finally(() => { busy = false; }); }
+    return;
+  }
   const t = trainAt(px, py);
   if (t) selected = { type: 'train', t };
   else if (s) selected = { type: 'station', s };
   else { const r = routeAt(px, py); selected = r ? { type: 'route', r } : null; }
   renderInfo();
-});
-cv.addEventListener('mousemove', e => {
+}
+cv.addEventListener('pointerup', endPointer);
+cv.addEventListener('pointercancel', endPointer);
+cv.addEventListener('pointermove', e => {
   mouse = { x: e.offsetX, y: e.offsetY };
+  if (pinch) return;
   if (drag) {
-    if (Math.hypot(e.offsetX - drag.x, e.offsetY - drag.y) > 4) drag.moved = true;
+    if (Math.hypot(e.offsetX - drag.x, e.offsetY - drag.y) > (e.pointerType === 'touch' ? 10 : 4)) drag.moved = true;
+    if (!drag.moved) return;
     cam.x = drag.cx - (e.offsetX - drag.x) / cam.z; cam.y = drag.cy - (e.offsetY - drag.y) / cam.z;
     return;
   }
+  if (e.pointerType === 'touch') return; // 터치에는 마우스 올리기가 없음
   hoverStation = stationAt(e.offsetX, e.offsetY);
   hoverTrain = hoverStation ? null : trainAt(e.offsetX, e.offsetY);
   const tip = $('tooltip');
@@ -595,7 +642,11 @@ cv.addEventListener('wheel', e => {
 
 window.addEventListener('keydown', e => {
   if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT') return;
-  if ($('modal').style.display === 'flex') { if (e.key === 'Enter') $('modalBox').querySelector('button.primary')?.click(); return; }
+  if ($('modal').style.display === 'flex') {
+    if (e.key === 'Enter') $('modalBox').querySelector('button.primary')?.click();
+    else if (e.key === 'Escape') $('askNo')?.click();
+    return;
+  }
   if (drawing) {
     if (e.key === 'Enter') finishDrawing();
     else if (e.key === 'Escape') cancelDrawing();
@@ -614,12 +665,18 @@ document.addEventListener('click', e => {
   const d = b.dataset;
   const findT = id => G.trains.find(t => t.id === +id) || G.depot.find(t => t.id === +id);
   const findR = no => G.routes.find(r => r.no === +no);
-  if (d.panel) openPanel(openPanelName === d.panel ? null : d.panel);
+  if (d.draw) {
+    if (busy) return;
+    if (d.draw === 'done') { if (drawing) finishDrawing(); else if (editing) applyEdit(); }
+    else if (d.draw === 'cancel') { if (drawing) cancelDrawing(); else cancelEdit(); }
+    else if (d.draw === 'undo' && drawing) { drawing.stops.pop(); drawing.legs.splice(Math.max(0, drawing.stops.length - 1)); }
+  }
+  else if (d.panel) openPanel(openPanelName === d.panel ? null : d.panel);
   else if (d.newroute) startDrawing(d.newroute);
   else if (d.route && !e.target.closest('button')) { const r = findR(d.route); selected = { type: 'route', r }; depotRouteNo = r.no; focusRoute(r); renderInfo(); }
   else if (d.buy) { const res = S.buyTrain(d.buy); if (check(res, `${CFG.kinds[d.buy].levels[0].name}을(를) 샀습니다`)) refreshAll(); }
   else if (d.up) { const t = findT(d.up); check(S.upgradeTrain(t), `${S.tierOf(t).name}(으)로 올렸습니다`); }
-  else if (d.sell) { const t = findT(d.sell); if (confirm(`${trainLabel(t)}을(를) ${won(S.sellValue(t))}에 팔까요?`)) { S.sellTrain(t); refreshAll(); } }
+  else if (d.sell) { const t = findT(d.sell); ask(`${trainLabel(t)}을(를) ${won(S.sellValue(t))}에 팔까요?`, '팔기').then(ok => { if (ok) { S.sellTrain(t); refreshAll(); } }); }
   else if (d.dispatch) { const r = findR(depotRouteNo); if (r) check(S.dispatch(findT(d.dispatch), r), `${S.routeTitle(r)}에 배차했습니다`); }
   else if (d.recall) { const t = G.trains.find(x => x.id === +d.recall); if (t) { S.recall(t); if (selected?.t === t) selected = null; refreshAll(); } }
   else if (d.add) { const r = findR(d.add); const t = G.depot.find(x => x.kind === r.kind && !S.canDispatch(x, r)) || G.depot.find(x => x.kind === r.kind); check(S.dispatch(t, r), '배차했습니다'); }
@@ -629,7 +686,7 @@ document.addEventListener('click', e => {
     check(S.dispatch(res.t, r), `${CFG.kinds[r.kind].levels[0].name}을(를) 사서 배차했습니다`);
   }
   else if (d.edit) startEdit(findR(d.edit));
-  else if (d.del) { const r = findR(d.del); if (confirm(`${S.routeTitle(r)} 노선을 지울까요? 열차는 차량기지로 돌아갑니다.`)) { S.deleteRoute(r); selected = null; refreshAll(); } }
+  else if (d.del) { const r = findR(d.del); ask(`${S.routeTitle(r)} 노선을 지울까요?\n열차는 차량기지로 돌아갑니다.`, '지우기').then(ok => { if (ok) { S.deleteRoute(r); selected = null; refreshAll(); } }); }
   else if (d.selroute) { selected = { type: 'route', r: findR(d.selroute) }; renderInfo(); }
   else if (d.unlock) { const id = d.unlock; if (check(S.unlockRegion(id), `${S.regionName[id]}을(를) 열었습니다`)) fitStations(stations.filter(s => s.region === id || G.unlocked.has(s.region))); }
   else if (d.region && !e.target.closest('button')) fitStations(stations.filter(s => s.region === d.region));
@@ -681,7 +738,8 @@ function endDay() {
 // ───────────────────────── 저장 ─────────────────────────
 function save() { try { localStorage.setItem(S.SAVE_KEY, S.serialize()); } catch (e) { /* 저장 공간 없음 */ } }
 function load() {
-  const s = localStorage.getItem(S.SAVE_KEY);
+  let s = null;
+  try { s = localStorage.getItem(S.SAVE_KEY); } catch (e) { return false; } // 저장소를 못 쓰는 환경
   if (!s) return false;
   try { S.deserialize(s); return true; } catch (e) { console.warn('저장 불러오기 실패', e); return false; }
 }
