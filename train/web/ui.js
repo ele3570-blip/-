@@ -53,6 +53,32 @@ function fitStations(ss, pad = 80) {
   cam.z = Math.max(0.6, Math.min(40, Math.min((W - pad * 2) / Math.max(5, x1 - x0), (H - pad * 2 - 80) / Math.max(5, y1 - y0))));
 }
 const land = S.D.land.map(ring => ring.map(([lon, lat]) => S.toKm(lon, lat)));
+// 지역 모양(km 좌표)과 색. 열린 지역은 지역마다 다른 옅은 색, 닫힌 지역은 회색 빗금
+const REGION_COLOR = { daegu: '#fde2e4', gyeongbuk_e: '#fff1c1', gyeongbuk_n: '#e2f0cb', busan: '#cde7f0', gyeongnam: '#d8f3dc',
+  chungcheong: '#ffe5d0', chungbuk: '#e4dcf5', capital: '#fbd6e8', gangwon: '#d3f0e8', jeonbuk: '#f6eac2', jeonnam: '#dbe7fb' };
+const REGION_INK = { daegu: '#be123c', gyeongbuk_e: '#a16207', gyeongbuk_n: '#4d7c0f', busan: '#0e7490', gyeongnam: '#15803d',
+  chungcheong: '#c2410c', chungbuk: '#6d28d9', capital: '#be185d', gangwon: '#0f766e', jeonbuk: '#a16207', jeonnam: '#1d4ed8' };
+const regionShapes = S.D.regions.filter(r => r.shape).map(r => ({ id: r.id, name: r.name,
+  rings: r.shape.map(ring => ring.map(([lon, lat]) => S.toKm(lon, lat))), label: S.toKm(...r.label) }));
+const hatch = (() => {
+  const c = document.createElement('canvas'); c.width = c.height = 10;
+  const g = c.getContext('2d'); g.fillStyle = '#e5e7eb'; g.fillRect(0, 0, 10, 10);
+  g.strokeStyle = '#d1d5db'; g.lineWidth = 2; g.beginPath(); g.moveTo(-2, 12); g.lineTo(12, -2); g.stroke();
+  return ctx.createPattern(c, 'repeat');
+})();
+// 조각(ring) 하나라도 안에 있으면 그 지역(조각끼리 겹칠 수 있음)
+function pointInRings(x, y, rings) {
+  return rings.some(ring => {
+    let inside = false;
+    for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+      const [xi, yi] = ring[i], [xj, yj] = ring[j];
+      if ((yi > y) !== (yj > y) && x < (xj - xi) * (y - yi) / (yj - yi) + xi) inside = !inside;
+    }
+    return inside;
+  });
+}
+function regionAt(px, py) { const x = wx(px), y = wy(py); return regionShapes.find(r => pointInRings(x, y, r.rings)) || null; }
+const canUnlock = id => !G.unlocked.has(id) && S.regionReachable(id);
 
 // ───────────────────────── 노선 겹침: 구간마다 나란히 ─────────────────────────
 let edgeSlots = new Map(); // edgeId → [routeNo…]
@@ -132,12 +158,52 @@ function trainScreen(t) {
 function draw() {
   ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
   ctx.fillStyle = '#dfe9f3'; ctx.fillRect(0, 0, W, H);
-  // 땅
-  ctx.fillStyle = '#f8fafc'; ctx.strokeStyle = '#cbd5e1'; ctx.lineWidth = 1;
+  // 땅(지역에 안 속한 곳: 제주 등)
+  ctx.fillStyle = '#eef1f4'; ctx.strokeStyle = '#cbd5e1'; ctx.lineWidth = 1;
   for (const ring of land) {
     ctx.beginPath();
     ring.forEach(([x, y], k) => k ? ctx.lineTo(sx(x), sy(y)) : ctx.moveTo(sx(x), sy(y)));
     ctx.closePath(); ctx.fill(); ctx.stroke();
+  }
+  // 지역: 열린 곳은 색, 닫힌 곳은 회색 빗금. 경계는 흰 선
+  const selRegion = selected?.type === 'region' ? selected.id : null;
+  for (const r of regionShapes) {
+    const open = G.unlocked.has(r.id);
+    // 조각마다 따로 칠함(한 경로로 칠하면 겹친 조각이 서로 지워짐)
+    ctx.fillStyle = open ? REGION_COLOR[r.id] || '#f1f5f9' : hatch;
+    for (const ring of r.rings) { ctx.beginPath(); ring.forEach(([x, y], k) => k ? ctx.lineTo(sx(x), sy(y)) : ctx.moveTo(sx(x), sy(y))); ctx.closePath(); ctx.fill(); }
+    ctx.beginPath();
+    for (const ring of r.rings) { ring.forEach(([x, y], k) => k ? ctx.lineTo(sx(x), sy(y)) : ctx.moveTo(sx(x), sy(y))); ctx.closePath(); }
+    ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 3; ctx.lineJoin = 'round'; ctx.stroke();
+    if (selRegion === r.id || (!open && canUnlock(r.id))) {
+      ctx.setLineDash(selRegion === r.id ? [] : [6, 5]);
+      ctx.strokeStyle = selRegion === r.id ? '#111827' : '#16a34a'; ctx.lineWidth = selRegion === r.id ? 2.5 : 1.8; ctx.stroke(); ctx.setLineDash([]);
+    }
+  }
+  // 지역 이름과 잠금 표시(확대하면 흐려짐)
+  const la = Math.max(0, Math.min(1, (14 - cam.z) / 8));
+  if (la > 0) {
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    for (const r of regionShapes) {
+      const open = G.unlocked.has(r.id), X = sx(r.label[0]), Y = sy(r.label[1]);
+      if (X < -100 || Y < -60 || X > W + 100 || Y > H + 60) continue;
+      ctx.globalAlpha = la;
+      ctx.font = '800 15px "Pretendard","Apple SD Gothic Neo","Noto Sans KR",sans-serif';
+      ctx.lineWidth = 4; ctx.strokeStyle = 'rgba(255,255,255,.85)';
+      const title = open ? r.name : `🔒 ${r.name}`;
+      ctx.strokeText(title, X, Y); ctx.fillStyle = open ? REGION_INK[r.id] || '#374151' : '#6b7280'; ctx.fillText(title, X, Y);
+      if (!open) {
+        const c = CFG.unlockCost[r.id], reach = S.regionReachable(r.id), ok = reach && G.money >= c;
+        const t2 = `${won(c)}${reach ? (ok ? ' · 열 수 있음' : '') : ' · 이어진 지역 먼저'}`;
+        ctx.font = '700 12px "Pretendard","Apple SD Gothic Neo","Noto Sans KR",sans-serif';
+        const w = ctx.measureText(t2).width + 14;
+        ctx.fillStyle = ok ? '#16a34a' : reach ? '#ffffff' : 'rgba(255,255,255,.8)';
+        ctx.beginPath(); ctx.roundRect(X - w / 2, Y + 11, w, 20, 10); ctx.fill();
+        if (!ok) { ctx.strokeStyle = '#d1d5db'; ctx.lineWidth = 1; ctx.stroke(); }
+        ctx.fillStyle = ok ? '#ffffff' : '#4b5563'; ctx.fillText(t2, X, Y + 21);
+      }
+    }
+    ctx.globalAlpha = 1; ctx.textAlign = 'start'; ctx.textBaseline = 'alphabetic';
   }
   // 선로
   const load = S.edgeLoad;
@@ -159,11 +225,14 @@ function draw() {
   }
   ctx.setLineDash([]); ctx.globalAlpha = 1;
   // 선택한 선로 구간 강조
+  // 일반선 = 노랑(구간)·주황(누른 곳), 고속선 = 굵은 파랑
   if (selected?.type === 'track') {
-    ctx.strokeStyle = 'rgba(250,204,21,.75)'; ctx.lineWidth = 12; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+    const hs = selected.e.line.kind === 'hs';
+    ctx.strokeStyle = hs ? 'rgba(37,99,235,.45)' : 'rgba(250,204,21,.75)'; ctx.lineWidth = hs ? 14 : 12; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
     for (const sc of selected.e.secs) for (const e of sc.edges) if (edgeVisible(e)) strokePts(edgeScreen(e, 0));
-    ctx.strokeStyle = 'rgba(234,88,12,.9)'; ctx.lineWidth = 5;
-    strokePts(edgeScreen(selected.e, 0));
+    ctx.strokeStyle = hs ? '#1d4ed8' : 'rgba(234,88,12,.9)'; ctx.lineWidth = hs ? 7 : 5;
+    if (hs) { for (const sc of selected.e.secs) for (const e of sc.edges) if (edgeVisible(e)) strokePts(edgeScreen(e, 0)); }
+    else strokePts(edgeScreen(selected.e, 0));
     ctx.lineCap = 'butt';
   }
   // 노선
@@ -344,6 +413,23 @@ function trackHtml(e) {
   }
   return h;
 }
+function regionHtml(id) {
+  const name = S.regionName[id], open = G.unlocked.has(id), c = CFG.unlockCost[id], reach = S.regionReachable(id);
+  const ss = stations.filter(s => s.region === id).sort((a, b) => b.on - a.on);
+  const on = ss.reduce((a, s) => a + s.on, 0);
+  const ls = [...new Set(S.sections.filter(sc => sc.region === id).map(sc => sc.line.name))];
+  const owned = ss.filter(s => S.stOwned(s)).length;
+  let h = `<div><span class="sw" style="display:inline-block;width:12px;height:12px;border-radius:3px;background:${REGION_COLOR[id] || '#eee'};border:1px solid ${REGION_INK[id] || '#999'};vertical-align:-1px"></span>
+    <b style="font-size:15px">${esc(name)}</b> ${open ? '<span class="tag ok">개방</span>' : '<span class="tag gray">🔒 미개방</span>'}</div>
+    <div class="muted">역 ${ss.length}개${open ? ` (보유 ${owned})` : ''} · 실제 하루 승차 ${fmt(on)}명</div>
+    <div class="muted">지나는 선로: ${ls.map(esc).join(', ')}</div>`;
+  if (!open) h += `<div class="btns" style="display:flex;gap:6px;align-items:center;margin-top:8px">
+      <button class="primary" data-unlock="${id}" ${!reach || G.money < c ? 'disabled' : ''}>🗺️ 지역 열기 ${won(c)}</button>
+      ${reach ? '' : '<span class="muted">열린 지역과 선로로 이어져야 합니다</span>'}</div>
+      <div class="muted" style="margin-top:4px">연 뒤에 쓸 역과 선로 구간을 따로 삽니다</div>`;
+  h += `<div class="wbox"><div class="wsub">큰 역</div>${ss.slice(0, 6).map(s => `<div class="wrow"><span class="wlab">${esc(s.name)}${open && !S.stOwned(s) ? ` <span class="muted">${won(S.stationPrice(s))}</span>` : ''}</span><span class="wbar"><i style="width:${s.on / ss[0].on * 100}%;background:${REGION_INK[id] || '#6366f1'}"></i></span><span class="wnum">${fmt(s.on)}명</span></div>`).join('')}</div>`;
+  return h;
+}
 function renderInfo() {
   const card = $('infoCard');
   if (!selected) { card.hidden = true; return; }
@@ -356,6 +442,7 @@ function renderInfo() {
     if (!G.trains.includes(selected.t)) { selected = null; card.hidden = true; return; }
     $('infoTitle').textContent = '🚆 열차'; $('info').innerHTML = trainHtml(selected.t);
   } else if (selected.type === 'track') { $('infoTitle').textContent = '🛤 선로'; $('info').innerHTML = trackHtml(selected.e); }
+  else if (selected.type === 'region') { $('infoTitle').textContent = '🗺️ 지역'; $('info').innerHTML = regionHtml(selected.id); }
 }
 
 // ───────────────────────── 설정창 ─────────────────────────
@@ -706,7 +793,11 @@ function endPointer(e) {
   else {
     const r = routeAt(px, py);
     if (r) selected = { type: 'route', r };
-    else { const ed = edgeAt(px, py, e.pointerType === 'touch' ? 16 : 8); selected = ed ? { type: 'track', e: ed } : null; }
+    else {
+      const ed = edgeAt(px, py, e.pointerType === 'touch' ? 16 : 8);
+      if (ed) selected = { type: 'track', e: ed };
+      else { const rg = regionAt(px, py); selected = rg ? { type: 'region', id: rg.id } : null; }
+    }
   }
   renderInfo();
 }

@@ -86,9 +86,9 @@ COORD_MID = {'일신': ('석불', '매곡'), '판교(충남)': ('웅천', '서�
 
 # 지역(개방 단위). 시군 이름 → 지역. 시작 지역은 대구권
 REGIONS = [
-    ('daegu', '대구권', ['대구', '경산시', '구미시', '칠곡군', '영천시', '청도군', '김천시', '군위군']),
-    ('gyeongbuk_e', '경북 동해안', ['경주시', '포항시', '영덕군', '울진군']),
-    ('gyeongbuk_n', '경북 북부', ['안동시', '영주시', '상주시', '문경시', '예천군', '의성군', '봉화군']),
+    ('daegu', '대구권', ['대구', '경산시', '구미시', '칠곡군', '영천시', '청도군', '김천시', '군위군', '성주군', '고령군']),
+    ('gyeongbuk_e', '경북 동해안', ['경주시', '포항시', '영덕군', '울진군', '울릉군']),
+    ('gyeongbuk_n', '경북 북부', ['안동시', '영주시', '상주시', '문경시', '예천군', '의성군', '봉화군', '영양군', '청송군']),
     ('busan', '부산·울산', ['부산', '울산', '양산시']),
     ('gyeongnam', '경남', ['경상남도']),
     ('chungcheong', '대전·충남·세종', ['대전', '충청남도', '세종']),
@@ -98,6 +98,9 @@ REGIONS = [
     ('jeonbuk', '전북', ['전라북도']),
     ('jeonnam', '광주·전남', ['광주', '전라남도']),
 ]
+
+# 지도 위 지역 이름 위치(겹치는 곳만 손으로)
+LABEL_FIX = {'gyeongnam': [128.1, 35.3], 'busan': [129.2, 35.55]}
 
 METRO_WORDS = ('도시철도', '지하철', '수도권 전철', '경전철', '신분당선')
 
@@ -199,6 +202,15 @@ def main():
     prov = json.load(open(os.path.join(RAW, 'skorea_provinces_geo_simple.json'), encoding='utf-8'))['features']
     pcode = {f['properties']['code']: f['properties']['name'] for f in prov}
 
+    def muni_region(m):
+        """시군구 → 지역 id (없으면 None: 제주 등)"""
+        pn = pcode.get(m['code'][:2], '')
+        keys = [m['name'], pn, pn.replace('광역시', '').replace('특별시', '').replace('특별자치시', '')]
+        for rid_, _, names in REGIONS:
+            for k in keys:
+                if any(k == n or (n.endswith(('시', '군')) and k.startswith(n)) for n in names): return rid_
+        return None
+
     def region_of(name):
         lon, lat = coord[name]
         m = locate(lon, lat, muni)
@@ -247,6 +259,24 @@ def main():
             land.append([[round(q[0], 3), round(q[1], 3)] for q in ring[::2]])
 
     regions = [{'id': r, 'name': n} for r, n, _ in REGIONS]
+    # 지도에 칠할 지역 모양: 시군구 경계를 지역별로 합침(shapely 필요. 없으면 생략)
+    try:
+        from shapely.geometry import shape, mapping
+        from shapely.ops import unary_union
+        parts = {}
+        for f in muni:
+            rg = muni_region(f['properties'])
+            if rg: parts.setdefault(rg, []).append(shape(f['geometry']).buffer(0))
+        for r in regions:
+            g = unary_union(parts.get(r['id'], [])).buffer(0.002).buffer(-0.002).simplify(0.004)
+            polys_ = list(g.geoms) if g.geom_type == 'MultiPolygon' else [g]
+            polys_ = [q for q in polys_ if q.area > 0.0005]
+            r['shape'] = [[[round(x, 3), round(y, 3)] for x, y in q.exterior.coords] for q in polys_]
+            big = max(polys_, key=lambda q: q.area)
+            pt = big.representative_point()
+            r['label'] = LABEL_FIX.get(r['id']) or [round(pt.x, 3), round(pt.y, 3)]
+    except ImportError:
+        print('  (shapely 없음: 지역 모양 생략)', file=sys.stderr)
     total = sum(st['on'] for st in stations)
     print(f'역 {len(stations)}개, 선로 {len(lines_out)}개, 하루 승차 {total:,}명', file=sys.stderr)
     for r in regions:
