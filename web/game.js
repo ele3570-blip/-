@@ -522,7 +522,7 @@ function arrive(b) {
     for (const p of q) {
       if (b.pax.length >= busTier(b).cap) {
         // 만차: 이 버스를 타려던 승객은 못 타고 남음
-        if (!p.leftBehind && p.options.some(o => o.route === b.route && heading(b, b.i, o.alight))) { p.leftBehind = true; G.today.leftBehind++; }
+        if (!p.leftBehind && p.options.some(o => o.route === b.route && heading(b, b.i, o.alight))) { p.leftBehind = true; G.today.leftBehind++; b.route.leftToday = (b.route.leftToday || 0) + 1; }
         left.push(p); continue;
       }
       const opt = p.options.find(o => o.route === b.route && heading(b, b.i, o.alight));
@@ -629,6 +629,7 @@ function endDay() {
     G.day++; G.t = CFG.dayStartMin; G.today = newToday();
     G.waiting = new Map(); spawnAcc.clear();
     for (const b of G.buses) b.pax = [];
+    for (const r of G.routes) r.leftToday = 0;
     G.paused = false; setSpeedUI();
     save();
   };
@@ -1013,6 +1014,25 @@ function draw() {
     ctx.setLineDash([8, 6]); ctx.strokeStyle = '#111827'; ctx.lineWidth = 3; ctx.stroke(); ctx.setLineDash([]);
   }
 
+  // 선택한 정류장에서 기다리는 승객들의 목적지 (점선, 많을수록 굵게)
+  if (selected && selected.type === 'stop' && G.waiting.get(selected.s.id)?.length) {
+    const s0 = selected.s, W = stopWaitSummary(s0.id);
+    ctx.save(); ctx.setLineDash([5, 5]); ctx.lineCap = 'round';
+    for (const [did, n] of W.byDest) {
+      const d = stops[did];
+      ctx.beginPath(); ctx.moveTo(sx(s0.x), sy(s0.y)); ctx.lineTo(sx(d.x), sy(d.y));
+      ctx.strokeStyle = 'rgba(124,58,237,.55)'; ctx.lineWidth = Math.min(7, 1.2 + n * 0.8); ctx.stroke();
+    }
+    ctx.setLineDash([]);
+    ctx.font = 'bold 11px sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    for (const [did, n] of W.byDest) {
+      const d = stops[did], X = sx(d.x), Y = sy(d.y);
+      ctx.fillStyle = '#7c3aed'; ctx.beginPath(); ctx.arc(X, Y - 14, 8, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = '#fff'; ctx.fillText(n, X, Y - 13.5);
+    }
+    ctx.restore();
+  }
+
   // 정류장: 흰 원 + 진한 테두리. 미보유 = 회색 테두리, 보유 = 진회색, 운행 중 = 노선 색 굵은 테두리
   const picked = id => (drawing && drawing.includes(id)) || (editing && editing.stops.includes(id));
   ctx.save();
@@ -1107,7 +1127,7 @@ function renderSide() {
     const d = document.createElement('div');
     d.className = 'route';
     d.innerHTML = `<span class="sw" style="background:${r.color}"></span>
-      <span class="nm"><b>${r.no}번</b> <span class="meta">${routeName(r)}<br>${r.stops.length}개 정류장 · ${routeKm(r).toFixed(1)}km<br>${n ? '운행 ' + n + '대 ' + mix : '<span class="neg">운행 버스 없음</span>'}</span></span>`;
+      <span class="nm"><b>${r.no}번</b> <span class="meta">${routeName(r)}<br>${r.stops.length}개 정류장 · ${routeKm(r).toFixed(1)}km<br>${n ? '운행 ' + n + '대 ' + mix : '<span class="neg">운행 버스 없음</span>'}${(() => { const w = routeWaiting(r).total, l = r.leftToday || 0; return w || l ? `<br><span class="${w >= 12 * Math.max(1, n) || l >= 20 ? 'neg' : ''}">대기 ${w}명${l ? ` · 만차 ${l}명` : ''}</span>` : ''; })()}</span></span>`;
     const disp = document.createElement('button'); disp.textContent = '🚌 배차/회수'; disp.title = '이 노선을 선택해 차고지 버스를 배차하거나 회수'; disp.onclick = () => { selected = { type: 'route', r }; renderSide(); };
     const edit = document.createElement('button'); edit.textContent = '✏️'; edit.title = '노선 수정'; edit.onclick = () => startEdit(r);
     const del = document.createElement('button'); del.textContent = '🗑'; del.title = '노선 삭제'; del.onclick = () => askDelete(r);
@@ -1205,6 +1225,60 @@ $('depot').addEventListener('click', e => {
   if (btn.dataset.act === 'dispatch' && depotTarget()) dispatch(b, depotTarget());
 });
 
+// ── 대기 승객 분석: 어느 노선·방향으로, 어디로 가려는지 ──
+function dirLabel(r, fromIdx, alightIdx) {
+  if (r.loop) return '순환';
+  const end = alightIdx > fromIdx ? r.stops[r.stops.length - 1] : r.stops[0];
+  return stops[end].name + ' 방면';
+}
+function stopWaitSummary(sid) {
+  const q = G.waiting.get(sid) || [];
+  const byLine = new Map(), byDong = new Map(), byDest = new Map();
+  let waitSum = 0, transfer = 0, left = 0;
+  for (const p of q) {
+    waitSum += G.t - p.since;
+    if (p.paid) transfer++;
+    if (p.leftBehind) left++;
+    // 탈 수 있는 노선·방향 (여러 개면 똑같이 나눠 셈)
+    const seen = new Set();
+    for (const o of p.options) {
+      const i = o.route.idxOf.get(sid);
+      if (i == null) continue;
+      const key = o.route.no + '|' + dirLabel(o.route, i, o.alight);
+      if (seen.has(key)) continue;
+      seen.add(key);
+    }
+    for (const key of seen) byLine.set(key, (byLine.get(key) || 0) + 1 / seen.size);
+    const d = stops[p.dest];
+    byDong.set(d.dong, (byDong.get(d.dong) || 0) + 1);
+    byDest.set(p.dest, (byDest.get(p.dest) || 0) + 1);
+  }
+  const lines = [...byLine.entries()].map(([k, v]) => { const [no, dir] = k.split('|'); return { r: G.routes.find(x => x.no === +no), dir, n: v }; })
+    .filter(x => x.r).sort((a, b) => b.n - a.n);
+  const dongs = [...byDong.entries()].sort((a, b) => b[1] - a[1]);
+  return { n: q.length, avgWait: q.length ? waitSum / q.length : 0, transfer, left, lines, dongs, byDest };
+}
+// 노선을 기다리는 승객 수(정류장별)
+function routeWaiting(r) {
+  let total = 0; const at = [];
+  for (const sid of r.stops) {
+    const q = G.waiting.get(sid) || [];
+    let n = 0;
+    for (const p of q) if (p.options.some(o => o.route === r)) n++;
+    total += n;
+    if (n) at.push([sid, n]);
+  }
+  at.sort((a, b) => b[1] - a[1]);
+  return { total, at };
+}
+function routeAdvice(r) {
+  const n = G.buses.filter(b => b.route === r).length, w = routeWaiting(r).total, left = r.leftToday || 0;
+  if (!n) return '<span class="neg">운행 버스가 없습니다. 차고지에서 배차하세요.</span>';
+  if (left >= 20) return `<span class="neg">오늘 만차로 ${left}명이 못 탔습니다. 버스를 더 넣거나 큰 버스로 바꾸세요.</span>`;
+  if (w >= 12 * n) return `<span class="neg">기다리는 승객이 많습니다. 버스 추가를 추천합니다.</span>`;
+  return '';
+}
+
 // ── 설정창(노선 · 차고지 · 지역 개방 · 도움말) ──
 const PANELS = { routes: '🚌 노선', depot: '🅿️ 차고지', regions: '🗺️ 지역 개방', help: '❓ 도움말' };
 let openPanelName = null, panelBeforeMapMode = null;
@@ -1229,6 +1303,21 @@ function renderBadges() {
   $('bRegions').textContent = can ? '+' + can : '';
 }
 
+function waitHtml(sid) {
+  const W = stopWaitSummary(sid);
+  if (!W.n) return '<div class="wbox muted">기다리는 승객이 없습니다.</div>';
+  const max = W.lines.length ? W.lines[0].n : 1;
+  return `<div class="wbox">
+    <div><b>기다리는 승객 ${W.n}명</b> <span class="muted">· 평균 ${Math.round(W.avgWait)}분째${W.transfer ? ` · 환승 ${W.transfer}명` : ''}${W.left ? ` · <span class="neg">만차로 못 탐 ${W.left}명</span>` : ''}</span></div>
+    <div class="wsub">타려는 노선 · 방향</div>
+    ${W.lines.map(x => `<div class="wrow"><span class="wlab"><b style="color:${x.r.color}">${x.r.no}번</b> ${x.dir}</span>
+      <span class="wbar"><i style="width:${Math.max(6, x.n / max * 100)}%;background:${x.r.color}"></i></span><span class="wnum">${Math.round(x.n)}명</span></div>`).join('')}
+    <div class="wsub">가려는 곳 (동)</div>
+    <div class="wdong">${W.dongs.slice(0, 5).map(([d, n]) => `<span>${d} <b>${n}</b></span>`).join('')}${W.dongs.length > 5 ? `<span class="muted">외 ${W.dongs.length - 5}곳</span>` : ''}</div>
+    <div class="muted" style="font-size:11px;margin-top:4px">지도의 점선 = 승객들이 가려는 목적지</div>
+  </div>`;
+}
+
 function renderInfo() {
   const el = $('info');
   $('infoCard').hidden = !selected;
@@ -1237,8 +1326,8 @@ function renderInfo() {
     const s = selected.s, rs = servedBy.get(s.id) || [], own = G.owned.has(s.id), price = stopPrice(s);
     el.innerHTML = `<b>${s.name}</b> ${own ? '<span class="pos">보유</span>' : '<span class="muted">미보유</span>'}<br><span class="muted">${s.gu} ${s.dong}${s.n > 1 ? ` · 정류소 ${s.n}곳 묶음` : ''}</span><br>
       실제 하루 평균 승차 <b>${fmt(s.on)}</b>명 / 하차 ${fmt(s.off)}명<br>
-      ${own ? `기다리는 승객 <b>${(G.waiting.get(s.id) || []).length}</b>명<br>
-      경유 노선: ${rs.length ? rs.map(r => `<span style="color:${r.color}">${r.no}번</span>`).join(', ') : '<span class="muted">없음 (노선에 넣어야 승객이 생깁니다)</span>'}`
+      ${own ? `경유 노선: ${rs.length ? rs.map(r => `<span style="color:${r.color}">${r.no}번</span>`).join(', ') : '<span class="muted">없음 (노선에 넣어야 승객이 생깁니다)</span>'}
+      ${waitHtml(s.id)}`
       : isOpen(s) ? `<button class="primary" data-act="buy" style="margin-top:6px;width:100%" ${G.money < price ? 'disabled' : ''}>정류장 구입 · ${won(price)}</button>`
       : `<span class="muted">${s.gu}를 먼저 개방해야 합니다</span>`}`;
   } else if (selected.type === 'route') {
@@ -1249,6 +1338,10 @@ function renderInfo() {
     el.innerHTML = `<b style="color:${r.color}">${r.no}번</b> ${routeName(r)}<br>
       ${r.loop ? '순환' : '왕복'} · ${r.stops.length}개 정류장 · ${routeKm(r).toFixed(1)}km<br>
       버스 ${bs.length}대 · 탑승 ${load}명 / ${seats}석${h < Infinity ? ` · 배차 약 ${Math.round(h)}분` : ''}
+      ${(() => { const RW = routeWaiting(r), adv = routeAdvice(r); return `<div class="wbox">
+        <b>이 노선을 기다리는 승객 ${RW.total}명</b>${r.leftToday ? ` <span class="neg">· 오늘 만차로 못 탐 ${r.leftToday}명</span>` : ''}
+        ${RW.at.length ? `<div class="wdong">${RW.at.slice(0, 4).map(([sid, n]) => `<span>${stops[sid].name} <b>${n}</b></span>`).join('')}</div>` : ''}
+        ${adv ? `<div style="margin-top:4px">${adv}</div>` : ''}</div>`; })()}
       <div style="margin-top:8px"><b>운행 중</b>${bs.length ? '' : ' <span class="muted">없음</span>'}</div>
       ${bs.map(b => { const t = busTier(b); return `<div style="display:flex;align-items:center;gap:6px;margin:4px 0">
           <span style="flex:1"><span style="color:${ink(t.color)}">■</span> ${busType(b).icon} ${b.id}호 ${t.name} <span class="muted">${b.pax.length}/${t.cap}</span></span>
