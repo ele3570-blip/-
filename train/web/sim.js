@@ -602,12 +602,20 @@ function buyTrain(kind, free = false) {
   G.depot.push(t);
   return { t };
 }
-function upgradeTrain(t) {
+// 등급 올리기: 차량기지에서도, 운행 중에도. 운행 중이면 다음 등급이 노선을 다닐 수 있어야 함
+function upgradeBlock(t) {
   const L = CFG.kinds[t.kind].levels;
-  if (t.lvl + 1 >= L.length) return { err: '최고 등급입니다' };
-  const c = L[t.lvl + 1].upgrade;
+  if (t.lvl + 1 >= L.length) return '최고 등급입니다';
+  if (G.trains.includes(t) && needsElec(t.kind, t.lvl + 1) && routeHasNonElec(t.route))
+    return `${L[t.lvl + 1].name}은(는) 전철화된 선로만 다닙니다. 노선에 비전철 구간이 있어 운행 중에는 올릴 수 없습니다`;
+  return null;
+}
+function upgradeTrain(t) {
+  const why = upgradeBlock(t); if (why) return { err: why };
+  const c = CFG.kinds[t.kind].levels[t.lvl + 1].upgrade;
   if (G.money < c) return { err: '돈이 부족합니다' };
   G.money -= c; G.today.bought += c; t.lvl++;
+  if (G.trains.includes(t)) rebuildNetwork(); // 운행 중: 속도·정원이 바뀜 → 수요 다시 계산 (지금 달리는 구간은 다음 역부터 새 속도)
   return {};
 }
 function sellTrain(t) { G.depot = G.depot.filter(x => x !== t); G.money += sellValue(t); }
@@ -813,7 +821,7 @@ function setupNewGame() {
   rebuildNetwork();
 }
 
-root.SIM = { CFG, D, G, dateOf, isMonthEnd, monthReport, startMonth, assetValue, creditGrade, loanLimit, canBorrow, borrow, repay, stations, byName, lines, edges, adj, sections, secById, edgeOwned, stOwned, secOwned, stationPrice, buyStation,
+root.SIM = { CFG, D, G, upgradeBlock, dateOf, isMonthEnd, monthReport, startMonth, assetValue, creditGrade, loanLimit, canBorrow, borrow, repay, stations, byName, lines, edges, adj, sections, secById, edgeOwned, stOwned, secOwned, stationPrice, buyStation,
   sectionPrice, buySection, missingSections, buySections, ownedKm, regionName, toKm, distKm, isOpen, lineElec, lineDbl, lineVmax, edgeOpen, edgeCap,
   kindOf, tierOf, needsElec, edgeAllowed, findPath, buildLegs, addRoute, routeTitle, routeKm, routeHasNonElec, routeOpen, routeTrains,
   legMinutes, edgeSpeed, cycleMinutes, headway, rideMinutes, rideKm, rebuildNetwork, planFrom, hourShare, peakAt, tick, satPct, closeDay, startNextDay,

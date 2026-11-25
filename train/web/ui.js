@@ -366,7 +366,7 @@ function routeHtml(r) {
     <div>기다리는 승객 ${fmt(waiting)}명${r.leftToday ? ` · <span class="neg">만석으로 못 탄 승객 ${fmt(r.leftToday)}명</span>` : ''}</div>`;
   if (!S.routeOpen(r)) h += `<div class="neg">열리지 않은 지역을 지나 운행할 수 없습니다</div>`;
   h += `<div class="wsub">열차 ${ts.length}대</div>`;
-  for (const t of ts) h += `<div class="bus">${trainLabel(t)} · ${t.pax.length}/${S.tierOf(t).cap}명 <button data-recall="${t.id}" style="float:right;padding:1px 7px;font-size:12px">회수</button></div>`;
+  for (const t of ts) h += `<div class="bus">${trainLabel(t)} · ${t.pax.length}/${S.tierOf(t).cap}명<div class="btns">${upBtn(t)}<button data-recall="${t.id}">회수</button></div></div>`;
   const cand = G.depot.filter(t => t.kind === r.kind);
   h += `<div class="btns" style="display:flex;flex-wrap:wrap;gap:4px;margin-top:6px">
     ${cand.length ? `<button class="primary" data-add="${r.no}">＋ 차량기지에서 배차 (${cand.length}대)</button>` : `<button data-buyadd="${r.no}">＋ ${K.name} 사서 배차 (${won(K.price)})</button>`}
@@ -379,7 +379,7 @@ function trainHtml(t) {
   return `<div><b style="font-size:15px">${trainLabel(t)}</b></div>
     <div class="muted">${esc(S.routeTitle(r))} · 다음 역 ${esc(stations[r.stops[j]].name)} · 최고 ${tier.vmax}km/h</div>
     <div>승객 <b>${t.pax.length}</b> / ${tier.cap}명</div>
-    <div class="btns" style="display:flex;gap:4px;margin-top:6px"><button data-recall="${t.id}">차량기지로 회수</button><button data-selroute="${r.no}">노선 보기</button></div>`;
+    <div class="btns" style="display:flex;flex-wrap:wrap;gap:4px;margin-top:6px">${upBtn(t)}<button data-recall="${t.id}">차량기지로 회수</button><button data-selroute="${r.no}">노선 보기</button></div>`;
 }
 // 선로 구간 카드: 누른 곳이 속한 구간(지역 경계면 두 구간)
 function trackHtml(e) {
@@ -481,13 +481,23 @@ function renderDepot() {
     return `<div class="bus"><b>${trainLabel(t)}</b> <span class="muted">Lv${t.lvl + 1} · ${tier.cap}명 · ${tier.vmax}km/h${tier.elec || CFG.kinds[t.kind].elec ? ' · 전철화 선로만' : ''}</span>
       <div class="btns">
         <button class="primary" data-dispatch="${t.id}" ${err ? `disabled title="${esc(err)}"` : ''}>배차</button>
-        ${nx ? `<button data-up="${t.id}" ${G.money < nx.upgrade ? 'disabled' : ''}>⬆ ${nx.name} (${won(nx.upgrade)})</button>` : ''}
+        ${nx ? upBtn(t) : ''}
         <button data-sell="${t.id}">매각 ${won(S.sellValue(t))}</button>
       </div></div>`;
   }).join('');
   const running = G.trains.slice().sort((a, b) => a.route.no - b.route.no);
-  if (running.length) $('depot').innerHTML += `<h3>운행 중 (${running.length}대)</h3>` + running.map(t =>
-    `<div class="bus">${trainLabel(t)} <span class="muted">· ${esc(S.routeTitle(t.route))}</span><div class="btns"><button data-recall="${t.id}">회수</button></div></div>`).join('');
+  if (running.length) $('depot').innerHTML += `<h3>운행 중 (${running.length}대)</h3>` + running.map(t => {
+    const tier = S.tierOf(t);
+    return `<div class="bus">${trainLabel(t)} <span class="muted">· ${esc(S.routeTitle(t.route))} · Lv${t.lvl + 1} · ${tier.cap}명 · ${tier.vmax}km/h</span>
+      <div class="btns">${upBtn(t)}<button data-recall="${t.id}">회수</button></div></div>`;
+  }).join('');
+}
+// 등급 올리기 버튼(차량기지·운행 중·열차 카드 공용)
+function upBtn(t) {
+  const nx = CFG.kinds[t.kind].levels[t.lvl + 1];
+  if (!nx) return '<span class="muted" style="font-size:12px;align-self:center">최고 등급</span>';
+  const why = S.upgradeBlock(t);
+  return `<button data-up="${t.id}" ${why || G.money < nx.upgrade ? 'disabled' : ''} title="${esc(why || '')}">⬆ ${nx.name} (${won(nx.upgrade)})</button>${why ? `<span class="muted" style="font-size:11px;flex-basis:100%">${esc(why)}</span>` : ''}`;
 }
 function renderRegions() {
   $('regions').innerHTML = S.D.regions.map(rg => {
