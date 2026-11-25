@@ -10,7 +10,8 @@
 - skorea_municipalities_geo_simple.json : 시군구 경계(같은 출처) → 역이 속한 시군 판정
 
 선로(노선별 역 순서)는 아래 LINES에 직접 적었다. 무궁화~KTX가 서는 역만 넣고,
-수도권 전철·도시철도 전용역은 뺀다. 역 사이 거리는 직선거리 × 선형 보정(CURVE).
+수도권 전철·도시철도 전용역은 뺀다. 역 사이 모양·거리는 train/data/rail_geom.json(OpenStreetMap 선로,
+build_rail_geom.py로 만듦)을 쓰고, 없는 구간만 직선거리 × 선형 보정(CURVE).
 """
 import csv, json, math, os, sys
 
@@ -136,17 +137,16 @@ def locate(x, y, feats):
     return best
 
 
-def main():
-    rows = list(csv.DictReader(open(os.path.join(RAW, 'korail_station_ridership_2025.csv'), encoding='utf-8')))
-    rid = {r['역명']: (int(r['승차인원']), int(r['하차인원'])) for r in rows}
+def used_stations():
+    used = []
+    for *_x, seq in LINES:
+        for st in seq.split():
+            if st not in used: used.append(st)
+    return used
 
-    # KTX 비율: 2023년 역별 KTX 승차 ÷ 전체 승차(2025)
-    ktx = {}
-    for r in csv.DictReader(open(os.path.join(RAW, 'ktx_station_ridership_2023.csv'), encoding='utf-8')):
-        if r['운행년월'].startswith('2023'):
-            n = {'신경주': '경주', '김천(구미)': '김천구미'}.get(r['정차역'], r['정차역'])
-            ktx[n] = ktx.get(n, 0) + int(r['하행_승차인원수']) + int(r['상행_승차인원수'])
 
+def station_coords():
+    """역 이름 → (lon, lat). 위키데이터 + 수동 보정"""
     wd = {}
     for b in json.load(open(os.path.join(RAW, 'wikidata_stations.json'), encoding='utf-8'))['results']['bindings']:
         n = b['sLabel']['value']
@@ -155,13 +155,7 @@ def main():
         lines = b.get('lines', {}).get('value', '')
         wd.setdefault(n, []).append((lon, lat, lines))
 
-    used = []
-    for _, _, _, _, _, _, seq in LINES:
-        for s in seq.split():
-            if s not in used: used.append(s)
-    missing = [s for s in used if s not in rid]
-    if missing: sys.exit(f'승하차 자료에 없는 역: {missing}')
-
+    used = used_stations()
     coord = {}
     for s in used:
         if s in COORD_FIX: coord[s] = COORD_FIX[s]; continue
@@ -172,6 +166,34 @@ def main():
         coord[s] = main_[0][:2]
     for s, (a, b) in COORD_MID.items():
         coord[s] = ((coord[a][0] + coord[b][0]) / 2, (coord[a][1] + coord[b][1]) / 2)
+
+    return coord
+
+
+def load_geom():
+    """실제 선로 모양·길이(build_rail_geom.py 결과). 없으면 직선"""
+    p = os.path.join(ROOT, 'data', 'rail_geom.json')
+    return json.load(open(p, encoding='utf-8')) if os.path.exists(p) else {}
+
+
+def main():
+    global GEOM
+    GEOM = load_geom()
+    print(f'실제 선로 모양: {len(GEOM)}개 구간', file=sys.stderr)
+    rows = list(csv.DictReader(open(os.path.join(RAW, 'korail_station_ridership_2025.csv'), encoding='utf-8')))
+    rid = {r['역명']: (int(r['승차인원']), int(r['하차인원'])) for r in rows}
+
+    # KTX 비율: 2023년 역별 KTX 승차 ÷ 전체 승차(2025)
+    ktx = {}
+    for r in csv.DictReader(open(os.path.join(RAW, 'ktx_station_ridership_2023.csv'), encoding='utf-8')):
+        if r['운행년월'].startswith('2023'):
+            n = {'신경주': '경주', '김천(구미)': '김천구미'}.get(r['정차역'], r['정차역'])
+            ktx[n] = ktx.get(n, 0) + int(r['하행_승차인원수']) + int(r['상행_승차인원수'])
+
+    used = used_stations()
+    missing = [s for s in used if s not in rid]
+    if missing: sys.exit(f'승하차 자료에 없는 역: {missing}')
+    coord = station_coords()
 
     muni = json.load(open(os.path.join(RAW, 'skorea_municipalities_geo_simple.json'), encoding='utf-8'))['features']
     prov = json.load(open(os.path.join(RAW, 'skorea_provinces_geo_simple.json'), encoding='utf-8'))['features']
@@ -203,16 +225,18 @@ def main():
     lines_out = []
     for lid, name, kind, elec, dbl, vmax, seq in LINES:
         ss = seq.split()
-        segs = []
+        segs, geo = [], []
         for a, b in zip(ss, ss[1:]):
-            d = km(coord[a], coord[b]) * CURVE[kind]
-            if d > (90 if kind == 'hs' else 45): print(f'  ! {name} {a}-{b} {d:.0f}km', file=sys.stderr)
+            g = GEOM.get(f'{lid}|{a}|{b}')
+            d = g['km'] if g else km(coord[a], coord[b]) * CURVE[kind]
+            geo.append(g['pts'] if g else None)
+            if not g and d > (90 if kind == 'hs' else 45): print(f'  ! {name} {a}-{b} {d:.0f}km', file=sys.stderr)
             segs.append(round(d, 1))
         for a, b, c in zip(ss, ss[1:], ss[2:]):
             if km(coord[a], coord[c]) < 0.6 * max(km(coord[a], coord[b]), km(coord[b], coord[c])):
                 print(f'  ! {name} 꺾임: {a}-{b}-{c}', file=sys.stderr)
         lines_out.append({'id': lid, 'name': name, 'kind': kind, 'elec': elec, 'dbl': dbl, 'vmax': vmax,
-                          'stations': [idx[s] for s in ss], 'km': segs})
+                          'stations': [idx[s] for s in ss], 'km': segs, 'geom': geo})
 
     # 지도 배경: 시도 경계(단순화)
     land = []
@@ -230,7 +254,7 @@ def main():
         print(f"  {r['name']}: 역 {len(ss)}, 하루 승차 {sum(s['on'] for s in ss):,}", file=sys.stderr)
 
     data = {'stations': stations, 'lines': lines_out, 'regions': regions, 'land': land,
-            'source': '한국철도공사 역별 승하차 현황(2025), KTX 역별 승하차(2023)'}
+            'source': '한국철도공사 역별 승하차 현황(2025), KTX 역별 승하차(2023), 선로 © OpenStreetMap 기여자(ODbL)'}
     with open(OUT, 'w', encoding='utf-8') as f:
         f.write('window.GAME_DATA = ' + json.dumps(data, ensure_ascii=False, separators=(',', ':')) + ';\n')
     print(f'→ {OUT} ({os.path.getsize(OUT):,} bytes)', file=sys.stderr)

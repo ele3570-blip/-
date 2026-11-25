@@ -32,6 +32,7 @@ const CFG = {
   },
   hsTrackFeePerKm: 300,         // 고속선 선로 사용료(열차 1km당)
   dwellBase: 1.0, dwellPerPax: 0.02, // 역 정차 시간(분)
+  avgSpeedFactor: { conv: 0.72, hs: 0.8 }, // 최고속도 대비 평균 속도
   // 선로 용량: 한 시간에 지나갈 수 있는 열차 수(양방향 합). 넘치면 그만큼 느려짐
   capSingle: 4, capDouble: 16, capHs: 24,
   // 선로 개량 비용(km당)
@@ -67,7 +68,7 @@ const CFG = {
     { name: '대구산업선', where: '서대구–대구국가산단', state: '공사 중' },
     { name: '광주–나주 광역철도', where: '광주–나주', state: '계획' },
   ],
-  starter: { kind: 'metro', name: '대경선', stops: ['구미', '왜관', '서대구', '대구', '동대구', '경산'] },
+  starter: { kind: 'metro', name: '대경선', trains: 2, stops: ['구미', '왜관', '서대구', '대구', '동대구', '경산'] },
   starterDepot: ['general'],
 };
 const HOUR0 = 5;
@@ -89,6 +90,10 @@ for (const l of lines) {
   l.edges = [];
   for (let k = 0; k + 1 < l.stations.length; k++) {
     const e = { id: edges.length, a: l.stations[k], b: l.stations[k + 1], km: l.km[k], line: l };
+    // 화면용 모양(km 좌표, a → b). 실제 선로가 없으면 직선. len[i] = 시작점부터 i번째 점까지 길이
+    const A = stations[e.a], B = stations[e.b];
+    e.P = l.geom && l.geom[k] ? l.geom[k].map(([lon, lat]) => toKm(lon, lat)) : [[A.x, A.y], [B.x, B.y]];
+    e.len = [0]; for (let i = 1; i < e.P.length; i++) e.len.push(e.len[i - 1] + Math.hypot(e.P[i][0] - e.P[i - 1][0], e.P[i][1] - e.P[i - 1][1]));
     edges.push(e); l.edges.push(e);
     adj[e.a].push(e); adj[e.b].push(e);
   }
@@ -130,6 +135,8 @@ const lineVmax = l => l.vmax + (G.lineUp[l.id]?.speed || 0);
 const edgeOpen = e => isOpen(stations[e.a]) && isOpen(stations[e.b]);
 const edgeOwned = e => e.secs.every(sc => G.ownedSecs.has(sc.id));
 const stOwned = s => G.ownedSt.has(typeof s === 'number' ? s : s.id);
+// 구간 평균 속도(km/h): 최고속도 그대로 계속 달리지는 못함(곡선·분기기·신호)
+function edgeSpeed(e, vmax) { return Math.min(vmax, lineVmax(e.line)) * CFG.avgSpeedFactor[e.line.kind]; }
 function edgeCap(e) { return e.line.kind === 'hs' ? CFG.capHs : lineDbl(e.line) ? CFG.capDouble : CFG.capSingle; }
 
 const kindOf = t => CFG.kinds[t.kind];
@@ -158,7 +165,7 @@ function findPath(from, to, kind, any = false) {
     for (const e of adj[u]) {
       if (!edgeOpen(e) || !edgeAllowed(e, kind) || (!any && !edgeOwned(e))) continue;
       const w = e.a === u ? e.b : e.a;
-      const nd = d + e.km / Math.min(v, lineVmax(e.line)) + 0.02; // 역을 지날 때 작은 벌점: 같은 시간이면 역이 적은 길
+      const nd = d + e.km / edgeSpeed(e, v) + 0.02; // 역을 지날 때 작은 벌점: 같은 시간이면 역이 적은 길
       if (nd < (dist.get(w) ?? Infinity)) { dist.set(w, nd); prev.set(w, e); heap.push([nd, w]); }
     }
   }
@@ -202,7 +209,7 @@ const routeTrains = r => G.trains.filter(t => t.route === r);
 // 다리(leg) 소요 시간(분): 구간별 속도 = min(열차, 선로) ÷ 혼잡 + 가감속 손실
 function legMinutes(leg, tier) {
   let m = 0;
-  for (const e of leg.edges) m += e.km / Math.min(tier.vmax, lineVmax(e.line)) * 60 * (edgeLoadFactor.get(e.id) || 1);
+  for (const e of leg.edges) m += e.km / edgeSpeed(e, tier.vmax) * 60 * (edgeLoadFactor.get(e.id) || 1);
   return m + tier.stopLoss;
 }
 function refTier(r) { const ts = routeTrains(r); return ts.length ? tierOf(ts[0]) : CFG.kinds[r.kind].levels[0]; }
@@ -228,7 +235,7 @@ function computeLoads() {
     if (!n) continue;
     // 혼잡 없는 상태로 한 바퀴 시간을 잼
     let m = 0; const tier = refTier(r);
-    for (const leg of r.legs) for (const e of leg.edges) m += e.km / Math.min(tier.vmax, lineVmax(e.line)) * 60;
+    for (const leg of r.legs) for (const e of leg.edges) m += e.km / edgeSpeed(e, tier.vmax) * 60;
     m = 2 * (m + r.legs.length * tier.stopLoss) + 2 * r.stops.length * (CFG.dwellBase + 0.3);
     const perHour = 2 * n * 60 / m;
     for (const leg of r.legs) for (const e of leg.edges) edgeLoad.set(e.id, (edgeLoad.get(e.id) || 0) + perHour);
@@ -697,14 +704,14 @@ function setupNewGame() {
   for (const id of ids) buyStation(stations[id], true);
   for (let k = 0; k + 1 < ids.length; k++) for (const sc of missingSections(findPath(ids[k], ids[k + 1], st.kind, true))) G.ownedSecs.add(sc.id);
   const r = addRoute(st.kind, ids, st.name);
-  dispatch(buyTrain(st.kind, true).t, r);
+  for (let k = 0; k < st.trains; k++) dispatch(buyTrain(st.kind, true).t, r);
   for (const k of CFG.starterDepot) buyTrain(k, true);
 }
 
 root.SIM = { CFG, D, G, stations, byName, lines, edges, adj, sections, secById, edgeOwned, stOwned, secOwned, stationPrice, buyStation,
   sectionPrice, buySection, missingSections, buySections, ownedKm, regionName, toKm, distKm, isOpen, lineElec, lineDbl, lineVmax, edgeOpen, edgeCap,
   kindOf, tierOf, needsElec, edgeAllowed, findPath, buildLegs, addRoute, routeTitle, routeKm, routeHasNonElec, routeOpen, routeTrains,
-  legMinutes, cycleMinutes, headway, rideMinutes, rideKm, rebuildNetwork, planFrom, hourShare, peakAt, tick, satPct, closeDay, startNextDay,
+  legMinutes, edgeSpeed, cycleMinutes, headway, rideMinutes, rideKm, rebuildNetwork, planFrom, hourShare, peakAt, tick, satPct, closeDay, startNextDay,
   trainValue, sellValue, buyTrain, upgradeTrain, sellTrain, canDispatch, dispatch, recall, deleteRoute, setRouteStops, unlockRegion,
   regionReachable, openKm, upgradeCost, upgradeLine, fareFor, nextIdx, SAVE_KEY, serialize, deserialize, setupNewGame,
   get edgeLoad() { return edgeLoad; }, get edgeLoadFactor() { return edgeLoadFactor; }, get servedBy() { return servedBy; }, get destTable() { return destTable; },

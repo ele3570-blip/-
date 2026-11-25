@@ -23,15 +23,19 @@
 
 ## 데이터 다시 만들기
 ```
-python3 train/scripts/build_train_data.py   # → train/web/data.js
-node train/scripts/sim_check.js 5 busan       # 화면 없이 며칠 돌려 보는 밸런스 점검
+python3 train/scripts/build_rail_geom.py <export.geojson>   # OSM 선로 → train/data/rail_geom.json (역 사이 실제 모양·길이)
+python3 train/scripts/build_train_data.py                   # → train/web/data.js
+node train/scripts/sim_check.js 5 busan                       # 화면 없이 며칠 돌려 보는 밸런스 점검
 ```
-선로(노선별 역 순서·전철화·복선·최고속도)는 `build_train_data.py`의 `LINES`에 직접 적었습니다.
-역 사이 거리는 직선거리 × 보정(일반선 1.15, 고속선 1.05)입니다.
+- 선로(노선별 역 순서·전철화·복선·최고속도)는 `build_train_data.py`의 `LINES`에 직접 적었습니다.
+- 역 사이 모양과 거리는 OpenStreetMap 실제 선로를 따라 잰 값입니다(271개 구간 중 269개. 대야–익산, 부산–부전만 직선).
+  `export.geojson`은 overpass-turbo.eu에서 받은 철도 선로 파일(약 22MB)로, 저장소에는 결과물 `rail_geom.json`만 넣었습니다.
+  받는 쿼리는 `build_rail_geom.py` 맨 위에 있습니다.
 
 ## 데이터 출처 (`train/data/raw/`)
 - 한국철도공사 역별 승하차 현황(2025년 합계), KTX 상하행 역별 승하차(~2023): 공공데이터포털
 - 역 좌표: 위키데이터(CC0)
+- 선로 모양: © OpenStreetMap 기여자 (ODbL), 2026-11 overpass-turbo 추출
 - 시도·시군구 경계: 통계청 2013, [southkorea-maps](https://github.com/southkorea/southkorea-maps)
 
 ## 밸런스

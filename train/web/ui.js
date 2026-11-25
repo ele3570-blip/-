@@ -59,12 +59,28 @@ function edgeOffset(e, r) {
   const L = edgeSlots.get(e.id) || [r.no];
   return (L.indexOf(r.no) - (L.length - 1) / 2) * slotGap();
 }
-// 구간 e를 a→b 방향으로 그릴 때 화면 좌표(어긋남 포함). 방향과 관계없이 같은 쪽으로 어긋나게 e.a→e.b 기준 법선 사용
+// 구간 e의 화면 좌표 점들(e.a → e.b, 실제 선로 모양). off만큼 옆으로 어긋나게(진행 방향 왼쪽이 +)
+// 화면에서 2px보다 가까운 점은 건너뜀
 function edgeScreen(e, off) {
-  const A = stations[e.a], B = stations[e.b];
-  const x1 = sx(A.x), y1 = sy(A.y), x2 = sx(B.x), y2 = sy(B.y);
-  const L = Math.hypot(x2 - x1, y2 - y1) || 1, nx = -(y2 - y1) / L, ny = (x2 - x1) / L;
-  return [x1 + nx * off, y1 + ny * off, x2 + nx * off, y2 + ny * off];
+  const out = [];
+  let lx = -1e9, ly = -1e9;
+  for (let i = 0; i < e.P.length; i++) {
+    const X = sx(e.P[i][0]), Y = sy(e.P[i][1]);
+    if (i && i < e.P.length - 1 && Math.abs(X - lx) + Math.abs(Y - ly) < 2) continue;
+    out.push([X, Y]); lx = X; ly = Y;
+  }
+  if (!off || out.length < 2) return out;
+  return out.map(([X, Y], i) => {
+    const p = out[Math.max(0, i - 1)], n = out[Math.min(out.length - 1, i + 1)];
+    const dx = n[0] - p[0], dy = n[1] - p[1], L = Math.hypot(dx, dy) || 1;
+    return [X - dy / L * off, Y + dx / L * off];
+  });
+}
+function strokePts(pts) { ctx.beginPath(); pts.forEach(([X, Y], i) => i ? ctx.lineTo(X, Y) : ctx.moveTo(X, Y)); ctx.stroke(); }
+function edgeVisible(e) {
+  const A = stations[e.a], B = stations[e.b], pad = Math.hypot(A.x - B.x, A.y - B.y) * cam.z * 0.6 + 40;
+  const X = sx((A.x + B.x) / 2), Y = sy((A.y + B.y) / 2);
+  return X > -pad && Y > -pad && X < W + pad && Y < H + pad;
 }
 
 // ───────────────────────── 그리기 ─────────────────────────
@@ -82,8 +98,13 @@ function trainPos(t) {
   for (const e of es) {
     const nxt = e.a === cur ? e.b : e.a;
     if (d <= e.km) {
-      const A = stations[cur], B = stations[nxt], f = d / e.km;
-      return { x: A.x + (B.x - A.x) * f, y: A.y + (B.y - A.y) * f, e, ang: Math.atan2(B.y - A.y, B.x - A.x) };
+      // 실제 선로 모양 위 위치: e.a 기준 비율로 바꿔서 찾음
+      const fwd = cur === e.a, f = fwd ? d / e.km : 1 - d / e.km;
+      const L = e.len[e.len.length - 1] * f;
+      let i = 1; while (i < e.len.length - 1 && e.len[i] < L) i++;
+      const p = e.P[i - 1], q = e.P[i], g = (L - e.len[i - 1]) / ((e.len[i] - e.len[i - 1]) || 1);
+      const ang = Math.atan2(q[1] - p[1], q[0] - p[0]) + (fwd ? 0 : Math.PI);
+      return { x: p[0] + (q[0] - p[0]) * g, y: p[1] + (q[1] - p[1]) * g, e, ang, nx: -(q[1] - p[1]), ny: q[0] - p[0] };
     }
     d -= e.km; cur = nxt;
   }
@@ -93,9 +114,8 @@ function trainScreen(t) {
   const p = trainPos(t);
   let X = sx(p.x), Y = sy(p.y);
   if (p.e) {
-    const off = edgeOffset(p.e, t.route), A = stations[p.e.a], B = stations[p.e.b];
-    const L = Math.hypot(B.x - A.x, B.y - A.y) || 1;
-    X += -(B.y - A.y) / L * off; Y += (B.x - A.x) / L * off;
+    const off = edgeOffset(p.e, t.route), L = Math.hypot(p.nx, p.ny) || 1;
+    X += p.nx / L * off; Y += p.ny / L * off;
   }
   return { X, Y, ang: p.ang || 0 };
 }
@@ -114,17 +134,18 @@ function draw() {
   const load = S.edgeLoad;
   for (const e of edges) {
     const open = S.edgeOpen(e), own = S.edgeOwned(e), hs = e.line.kind === 'hs', el = S.lineElec(e.line), dbl = S.lineDbl(e.line);
-    const [x1, y1, x2, y2] = edgeScreen(e, 0);
+    if (!edgeVisible(e)) continue;
+    const pts = edgeScreen(e, 0);
     ctx.globalAlpha = !open ? 0.3 : own ? 1 : 0.55;
     ctx.setLineDash(el ? [] : [5, 4]);
     ctx.strokeStyle = hs ? '#1f2937' : el ? '#6b7280' : '#9ca3af';
     ctx.lineWidth = (hs ? 3.2 : dbl ? 2.4 : 1.6) * (own ? 1 : 0.6);
-    ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke();
+    strokePts(pts);
     const l = load.get(e.id) || 0, cap = S.edgeCap(e);
     if (open && l > cap * 0.8) {
       ctx.setLineDash([]);
       ctx.strokeStyle = l > cap ? 'rgba(220,38,38,.55)' : 'rgba(245,158,11,.5)'; ctx.lineWidth = 9;
-      ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke();
+      strokePts(pts);
     }
   }
   ctx.setLineDash([]); ctx.globalAlpha = 1;
@@ -133,24 +154,21 @@ function draw() {
   for (const r of G.routes) {
     const dim = selRoute && selRoute !== r;
     ctx.globalAlpha = dim ? 0.25 : r.active ? 1 : 0.5;
-    ctx.strokeStyle = r.color; ctx.lineWidth = selRoute === r ? 5 : 3.5; ctx.lineCap = 'round';
-    for (const leg of r.legs) for (const e of leg.edges) {
-      const [x1, y1, x2, y2] = edgeScreen(e, edgeOffset(e, r));
-      ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke();
-    }
+    ctx.strokeStyle = r.color; ctx.lineWidth = selRoute === r ? 5 : 3.5; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+    for (const leg of r.legs) for (const e of leg.edges) if (edgeVisible(e)) strokePts(edgeScreen(e, edgeOffset(e, r)));
   }
   ctx.globalAlpha = 1; ctx.lineCap = 'butt';
   // 그리는 중인 노선 미리보기
   const plan = drawing || editing;
   if (plan) {
     ctx.strokeStyle = '#111827'; ctx.lineWidth = 3; ctx.setLineDash([7, 5]);
-    for (const leg of plan.legs) for (const e of leg.edges) { const [x1, y1, x2, y2] = edgeScreen(e, 0); ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke(); }
+    for (const leg of plan.legs) for (const e of leg.edges) strokePts(edgeScreen(e, 0));
     if (drawing && hoverStation && drawing.stops.length) {
       const a = drawing.stops[drawing.stops.length - 1];
       let P = S.findPath(a, hoverStation.id, drawing.kind);
       ctx.strokeStyle = '#2563eb';
       if (!P) { P = S.findPath(a, hoverStation.id, drawing.kind, true); ctx.strokeStyle = '#f59e0b'; }
-      if (P) for (const e of P.edges) { const [x1, y1, x2, y2] = edgeScreen(e, 0); ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke(); }
+      if (P) for (const e of P.edges) strokePts(edgeScreen(e, 0));
     }
     ctx.setLineDash([]);
   }
@@ -513,11 +531,15 @@ function trainAt(px, py) {
 function routeAt(px, py) {
   let best = null, bd = 6;
   for (const r of G.routes) for (const leg of r.legs) for (const e of leg.edges) {
-    const [x1, y1, x2, y2] = edgeScreen(e, edgeOffset(e, r));
-    const L2 = (x2 - x1) ** 2 + (y2 - y1) ** 2 || 1;
-    const u = Math.max(0, Math.min(1, ((px - x1) * (x2 - x1) + (py - y1) * (y2 - y1)) / L2));
-    const d = Math.hypot(x1 + u * (x2 - x1) - px, y1 + u * (y2 - y1) - py);
-    if (d < bd) { bd = d; best = r; }
+    if (!edgeVisible(e)) continue;
+    const pts = edgeScreen(e, edgeOffset(e, r));
+    for (let k = 1; k < pts.length; k++) {
+      const [x1, y1] = pts[k - 1], [x2, y2] = pts[k];
+      const L2 = (x2 - x1) ** 2 + (y2 - y1) ** 2 || 1;
+      const u = Math.max(0, Math.min(1, ((px - x1) * (x2 - x1) + (py - y1) * (y2 - y1)) / L2));
+      const d = Math.hypot(x1 + u * (x2 - x1) - px, y1 + u * (y2 - y1) - py);
+      if (d < bd) { bd = d; best = r; }
+    }
   }
   return best;
 }
@@ -692,7 +714,7 @@ renderTop(); renderBadges(); setSpeedUI();
 if (!loaded) {
   G.paused = true; setSpeedUI();
   showModal(`<h2 style="margin:0 0 8px">🚄 전국 철도 경영</h2>
-    <p style="line-height:1.7">동대구역에서 시작합니다. 대구권에는 <b>대경선</b>(구미–경산 광역열차)이 1대 달리고 있고, 차량기지에 <b>무궁화호</b> 1대가 있습니다.</p>
+    <p style="line-height:1.7">동대구역에서 시작합니다. 대구권에는 <b>대경선</b>(구미–경산 광역열차)이 2대 달리고 있고, 차량기지에 <b>무궁화호</b> 1대가 있습니다.</p>
     <p style="line-height:1.7">역을 눌러 사람들이 어디로 가고 싶은지 보세요. 대구 사람들은 대부분 서울·부산으로 갑니다.</p>
     <p style="line-height:1.7">넓히는 순서: 🗺️ <b>지역 열기</b> → 🔧 <b>선로 구간 사기</b> → <b>역 사기</b> → 노선 만들기. 노선을 그리다 안 산 역이나 구간을 누르면 바로 살 수 있습니다. 승객은 한 번까지 갈아탑니다.</p>
     <p class="muted">수요: 한국철도공사 역별 승하차(2025)를 하루 평균으로 나눈 값. 진행은 브라우저에 하루 단위로 저장됩니다.</p>
