@@ -969,7 +969,8 @@ cv.addEventListener('wheel', e => {
 }, { passive: false });
 
 window.addEventListener('keydown', e => {
-  if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT') return;
+  if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT' || e.target.tagName === 'TEXTAREA') return;
+  if (homeOpen() && $('modal').style.display !== 'flex') return;
   if ($('modal').style.display === 'flex') {
     if (e.key === 'Enter') $('modalBox').querySelector('button.primary')?.click();
     else if (e.key === 'Escape') $('askNo')?.click();
@@ -1022,7 +1023,7 @@ document.addEventListener('click', e => {
   else if (d.buysec) { const sc = S.secById.get(d.buysec); check(S.buySection(sc), `${sc.line.name} ${S.regionName[sc.region]} 구간을 샀습니다`); }
   else if (d.borrow) { const r = S.borrow(d.borrow === 'max' ? Infinity : +d.borrow); check(r, r.amount ? `${won(r.amount)}을 빌렸습니다` : ''); }
   else if (d.repay) { const r = S.repay(d.repay === 'max' ? Infinity : +d.repay); check(r, r.amount ? `${won(r.amount)}을 갚았습니다` : ''); }
-  else if (d.newgame) { try { localStorage.removeItem(S.SAVE_KEY); } catch (e) { /* 없음 */ } location.reload(); }
+  else if (d.newgame) { showHome(); renderSlots('new'); }
   else if (d.lup) { const [id, what] = d.lup.split(':'); check(S.upgradeLine(lines.find(l => l.id === id), what), '공사를 마쳤습니다'); }
 });
 $('depotRoute').addEventListener('change', e => { depotRouteNo = +e.target.value || null; renderDepot(); });
@@ -1098,14 +1099,155 @@ function endDay() {
   save();
 }
 
-// ───────────────────────── 저장 ─────────────────────────
-function save() { try { localStorage.setItem(S.SAVE_KEY, S.serialize()); } catch (e) { /* 저장 공간 없음 */ } }
-function load() {
-  let s = null;
-  try { s = localStorage.getItem(S.SAVE_KEY); } catch (e) { return false; } // 저장소를 못 쓰는 환경
-  if (!s) return false;
-  try { S.deserialize(s); return true; } catch (e) { console.warn('저장 불러오기 실패', e); return false; }
+// ───────────────────────── 저장: 칸 3개 + 백업 ─────────────────────────
+const SLOTS = 3, META_KEY = 'korea-rail-meta';
+const slotKey = n => `korea-rail-slot-${n}`;
+let curSlot = null; // 지금 하고 있는 저장 칸(홈에서 고르기 전엔 없음)
+const store = {
+  get: k => { try { return localStorage.getItem(k); } catch (e) { return null; } },
+  set: (k, v) => { try { localStorage.setItem(k, v); return true; } catch (e) { return false; } },
+  del: k => { try { localStorage.removeItem(k); } catch (e) { /* 없음 */ } },
+};
+const meta = () => { try { return JSON.parse(store.get(META_KEY)) || {}; } catch (e) { return {}; } };
+const slotInfo = n => { try { return JSON.parse(store.get(slotKey(n) + '-info')); } catch (e) { return null; } };
+function save() {
+  if (curSlot == null) return;
+  const d = S.dateOf();
+  store.set(slotKey(curSlot), S.serialize());
+  store.set(slotKey(curSlot) + '-info', JSON.stringify({ date: `${d.y}년 ${d.m}월 ${d.d}일`, money: G.money, debt: G.debt,
+    routes: G.routes.length, trains: G.trains.length + G.depot.length, regions: G.unlocked.size, over: G.over, savedAt: Date.now() }));
+  store.set(META_KEY, JSON.stringify({ ...meta(), last: curSlot }));
 }
+// 예전 저장(한 칸) → 1번 칸으로 옮김
+(function migrate() {
+  const old = store.get(S.SAVE_KEY);
+  if (!old || store.get(slotKey(1))) return;
+  try { S.deserialize(old); curSlot = 1; save(); curSlot = null; store.del(S.SAVE_KEY); } catch (e) { /* 깨진 저장 */ }
+  S.resetGame();
+})();
+function afterSwitch() { // 새 게임·불러오기 뒤 화면 정리
+  selected = null; drawing = null; editing = null; cv.classList.remove('drawing'); setHint('');
+  openPanel(null); hideModal();
+  S.rebuildNetwork(); assignSlots();
+  fitStations(stations.filter(s => G.unlocked.has(s.region)).length > 15 ? stations.filter(s => S.stOwned(s)) : stations.filter(s => s.region === CFG.startRegion));
+  refreshAll(); setSpeedUI();
+}
+function startNew(n) {
+  S.resetGame(); S.setupNewGame(); curSlot = n; save();
+  hideHome(); afterSwitch();
+  G.paused = true; setSpeedUI(); showIntro();
+}
+function loadSlot(n) {
+  const data = store.get(slotKey(n));
+  if (!data) return toast('빈 칸입니다');
+  try { S.resetGame(); S.deserialize(data); } catch (e) { S.resetGame(); return toast('저장을 읽지 못했습니다'); }
+  curSlot = n; store.set(META_KEY, JSON.stringify({ ...meta(), last: n }));
+  hideHome(); afterSwitch();
+  if (G.over) { G.paused = true; showModal(`<h2 style="margin:0 0 8px">파산</h2><p>이 저장은 파산으로 끝났습니다.</p><button class="primary" data-gohome="1" style="width:100%">홈으로</button>`); }
+  else { G.paused = false; setSpeedUI(); toast(`${n}번 칸을 불러왔습니다`, '#15803d'); }
+}
+function showIntro() {
+  showModal(`<h2 style="margin:0 0 8px">🚄 새 게임</h2>
+    <p style="line-height:1.7"><b>동대구역</b> 하나와 차량기지의 <b>무궁화호 1대</b>로 시작합니다. 경부선 대구권 구간도 가지고 있습니다.</p>
+    <p style="line-height:1.7">첫 노선을 만들어 보세요. 🛤️ 노선 → 🚃 새 일반열차 → 동대구와 다른 역을 차례로 누르면, 아직 안 산 역은 그 자리에서 살 수 있습니다. 그다음 노선 카드에서 무궁화호를 배차합니다.</p>
+    <p style="line-height:1.7">역을 눌러 사람들이 어디로 가고 싶은지 보세요. 대구 사람들은 대부분 서울·부산으로 갑니다.</p>
+    <p style="line-height:1.7">넓히는 순서: 🗺️ <b>지역 열기</b> → 🔧 <b>선로 구간 사기</b> → <b>역 사기</b> → 노선 만들기. 승객은 한 번까지 갈아탑니다.</p>
+    <p class="muted">수요: 한국철도공사 역별 승하차(2025)를 하루 평균으로 나눈 값. 2026년 1월 1일부터 시작해 달이 끝날 때마다 결산하고, 진행은 하루 단위로 ${curSlot}번 칸에 저장됩니다.</p>
+    <button class="primary" id="startBtn" style="width:100%">시작</button>`);
+  $('startBtn').onclick = () => { hideModal(); G.paused = false; setSpeedUI(); save(); };
+}
+
+// 홈 화면
+const homeOpen = () => !$('home').hidden;
+function slotLine(n) {
+  const i = slotInfo(n);
+  if (!i) return '<span class="muted">빈 칸</span>';
+  const when = new Date(i.savedAt);
+  return `<b>${esc(i.date)}</b>${i.over ? ' <span class="tag warn">파산</span>' : ''}<br>
+    <span class="muted">💰 ${won(i.money)}${i.debt ? ` · 빚 ${won(i.debt)}` : ''} · 노선 ${i.routes} · 열차 ${i.trains} · 지역 ${i.regions}<br>
+    저장 ${when.getMonth() + 1}/${when.getDate()} ${String(when.getHours()).padStart(2, '0')}:${String(when.getMinutes()).padStart(2, '0')}</span>`;
+}
+function renderHome() {
+  const last = meta().last, li = last && slotInfo(last);
+  const cont = curSlot != null ? { n: curSlot, label: '계속하기' } : li ? { n: last, label: '이어하기' } : null;
+  $('homeMain').innerHTML = `
+    ${cont ? `<button class="primary homebtn" data-home="continue">▶ ${cont.label}<small>${cont.n}번 칸 · ${esc((slotInfo(cont.n) || {}).date || '')}</small></button>` : ''}
+    <button class="${cont ? '' : 'primary '}homebtn" data-home="new">＋ 새 게임<small>동대구역 · 무궁화호 1대 · 4,500만원</small></button>
+    <button class="homebtn" data-home="load">📂 불러오기<small>저장 칸 ${SLOTS}개 · 백업 복사·붙여넣기</small></button>`;
+  $('homeMain').hidden = false; $('homeSlots').hidden = true;
+}
+function renderSlots(mode) { // mode: 'new' | 'load'
+  let h = `<h3 style="text-align:left">${mode === 'new' ? '새 게임을 저장할 칸' : '불러올 칸'}</h3>`;
+  for (let n = 1; n <= SLOTS; n++) {
+    const has = !!slotInfo(n);
+    h += `<div class="slot"><div><b>${n}번 칸</b>${n === curSlot ? ' <span class="tag ok">지금 게임</span>' : ''}</div><div>${slotLine(n)}</div><div class="btns">
+      ${mode === 'new' ? `<button class="primary" data-slotnew="${n}">${has ? '덮어쓰고 ' : ''}새 게임</button>`
+        : has ? `<button class="primary" data-slotload="${n}">불러오기</button><button data-slotcopy="${n}">백업 복사</button><button data-slotdel="${n}">지우기</button>` : ''}
+      ${mode === 'load' ? `<button data-slotpaste="${n}">백업 붙여넣기</button>` : ''}
+    </div></div>`;
+  }
+  h += `<button class="homebtn" data-home="back" style="text-align:center">← 뒤로</button>`;
+  $('homeSlots').innerHTML = h; $('homeSlots').hidden = false; $('homeMain').hidden = true;
+}
+function showHome() {
+  if (drawing) cancelDrawing(); if (editing) cancelEdit();
+  save(); G.paused = true; setSpeedUI();
+  hideModal(); renderHome(); $('home').hidden = false;
+}
+function hideHome() { $('home').hidden = true; }
+$('homeBtn').onclick = () => showHome();
+document.addEventListener('click', e => {
+  const b = e.target.closest('button'); if (!b) return;
+  const d = b.dataset;
+  if (d.home === 'continue') {
+    if (curSlot != null) { hideHome(); G.paused = false; setSpeedUI(); }
+    else loadSlot(meta().last);
+  } else if (d.home === 'new') renderSlots('new');
+  else if (d.home === 'load') renderSlots('load');
+  else if (d.home === 'back') renderHome();
+  else if (d.gohome) showHome();
+  else if (d.slotnew) {
+    const n = +d.slotnew;
+    if (slotInfo(n)) ask(`${n}번 칸의 저장을 지우고 새 게임을 시작할까요?\n(${slotInfo(n).date})`, '덮어쓰고 시작').then(ok => { if (ok) startNew(n); else renderSlots('new'); });
+    else startNew(n);
+  } else if (d.slotload) loadSlot(+d.slotload);
+  else if (d.slotdel) {
+    const n = +d.slotdel;
+    ask(`${n}번 칸의 저장을 지울까요? 되돌릴 수 없습니다.`, '지우기').then(ok => {
+      if (ok) { store.del(slotKey(n)); store.del(slotKey(n) + '-info'); if (curSlot === n) curSlot = null; }
+      renderSlots('load');
+    });
+  } else if (d.slotcopy) {
+    const n = +d.slotcopy, text = 'KRAIL1:' + store.get(slotKey(n));
+    showModal(`<h3 style="margin:0 0 8px">${n}번 칸 백업</h3>
+      <p class="muted" style="margin:0 0 8px">아래 글자를 통째로 복사해 메모장 등에 보관하세요. 나중에 '백업 붙여넣기'로 되살릴 수 있습니다.</p>
+      <textarea id="bkText" readonly></textarea>
+      <div style="display:flex;gap:8px;margin-top:10px"><button id="askNo" style="flex:1">닫기</button><button class="primary" id="bkCopy" style="flex:1">복사</button></div>`);
+    $('bkText').value = text;
+    $('askNo').onclick = () => { hideModal(); };
+    $('bkCopy').onclick = () => {
+      const ta = $('bkText'); ta.focus(); ta.select();
+      (navigator.clipboard?.writeText(text) || Promise.reject()).then(() => toast('복사했습니다', '#15803d'))
+        .catch(() => { try { document.execCommand('copy'); toast('복사했습니다', '#15803d'); } catch (e2) { toast('자동 복사가 안 됩니다. 글자를 길게 눌러 직접 복사하세요'); } });
+    };
+  } else if (d.slotpaste) {
+    const n = +d.slotpaste;
+    showModal(`<h3 style="margin:0 0 8px">${n}번 칸에 백업 붙여넣기</h3>
+      <p class="muted" style="margin:0 0 8px">보관해 둔 백업 글자(KRAIL1:로 시작)를 붙여넣으세요.${slotInfo(n) ? ' 이 칸의 지금 저장은 지워집니다.' : ''}</p>
+      <textarea id="bkIn" placeholder="KRAIL1:..."></textarea>
+      <div style="display:flex;gap:8px;margin-top:10px"><button id="askNo" style="flex:1">취소</button><button class="primary" id="bkOk" style="flex:1">넣기</button></div>`);
+    $('askNo').onclick = () => hideModal();
+    $('bkOk').onclick = () => {
+      const v = $('bkIn').value.trim().replace(/^KRAIL1:/, '');
+      try { JSON.parse(v); } catch (e2) { return toast('백업 글자가 올바르지 않습니다'); }
+      const keep = curSlot; // 검사용으로 읽어 보고 원래 게임으로 되돌림
+      try { S.resetGame(); S.deserialize(v); } catch (e2) { toast('읽을 수 없는 백업입니다'); }
+      curSlot = n; save(); curSlot = keep;
+      if (keep != null) { S.resetGame(); S.deserialize(store.get(slotKey(keep))); afterSwitch(); } else S.resetGame();
+      hideModal(); renderSlots('load'); toast(`${n}번 칸에 넣었습니다`, '#15803d');
+    };
+  }
+});
 
 // ───────────────────────── 루프 ─────────────────────────
 let last = performance.now(), uiTimer = 0;
@@ -1131,27 +1273,17 @@ function frame(now) {
 }
 
 resize();
-const loaded = load();
-if (!loaded) S.setupNewGame();
-if (G.over) setTimeout(() => { G.paused = true; showModal(`<h2 style="margin:0 0 8px">파산</h2><p>지난 게임은 파산으로 끝났습니다.</p><button class="primary" data-newgame="1" style="width:100%">새 게임</button>`); }, 0);
+S.setupNewGame(); // 홈 뒤에 보이는 지도용(아직 저장 칸 없음)
 S.rebuildNetwork(); assignSlots();
 fitStations(stations.filter(s => s.region === CFG.startRegion));
-renderTop(); renderBadges(); setSpeedUI();
-if (!loaded) {
-  G.paused = true; setSpeedUI();
-  showModal(`<h2 style="margin:0 0 8px">🚄 전국 철도 경영</h2>
-    <p style="line-height:1.7"><b>동대구역</b> 하나와 차량기지의 <b>무궁화호 1대</b>로 시작합니다. 경부선 대구권 구간도 가지고 있습니다.</p>
-    <p style="line-height:1.7">첫 노선을 만들어 보세요. 🛤️ 노선 → 🚃 새 일반열차 → 동대구와 다른 역을 차례로 누르면, 아직 안 산 역은 그 자리에서 살 수 있습니다. 그다음 노선 카드에서 무궁화호를 배차합니다.</p>
-    <p style="line-height:1.7">역을 눌러 사람들이 어디로 가고 싶은지 보세요. 대구 사람들은 대부분 서울·부산으로 갑니다.</p>
-    <p style="line-height:1.7">넓히는 순서: 🗺️ <b>지역 열기</b> → 🔧 <b>선로 구간 사기</b> → <b>역 사기</b> → 노선 만들기. 노선을 그리다 안 산 역이나 구간을 누르면 바로 살 수 있습니다. 승객은 한 번까지 갈아탑니다.</p>
-    <p class="muted">수요: 한국철도공사 역별 승하차(2025)를 하루 평균으로 나눈 값. 2026년 1월 1일부터 시작해 달이 끝날 때마다 결산하고, 진행은 브라우저에 하루 단위로 저장됩니다.</p>
-    <button class="primary" id="startBtn" style="width:100%">시작</button>`);
-  $('startBtn').onclick = () => { hideModal(); G.paused = false; setSpeedUI(); save(); };
-}
+renderTop(); renderBadges();
+G.paused = true; setSpeedUI();
+showHome();
 requestAnimationFrame(frame);
 // 안드로이드 앱용: 뒤로 가기 = 열린 창부터 닫기(닫았으면 true), 앱을 내리면 멈추고 저장
 window.__back = () => {
   if ($('modal').style.display === 'flex') { const no = $('askNo'); if (no) no.click(); return true; }
+  if (homeOpen()) { if (!$('homeSlots').hidden) { renderHome(); return true; } return false; }
   if (drawing) { cancelDrawing(); return true; }
   if (editing) { cancelEdit(); return true; }
   if (openPanelName) { openPanel(null); return true; }

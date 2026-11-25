@@ -128,7 +128,8 @@ for (const l of lines) {
 }
 
 // ───────────────────────── 상태 ─────────────────────────
-const G = {
+// 새 게임 상태(처음 값). resetGame()에서도 씀
+const freshState = () => ({
   money: CFG.startMoney, day: 1, t: CFG.dayStartMin, speed: 3, paused: false,
   unlocked: new Set([CFG.startRegion]),
   ownedSecs: new Set(), ownedSt: new Set(), // 산 선로 구간, 산 역
@@ -138,7 +139,8 @@ const G = {
   today: null, rep: CFG.repStart, history: [],
   debt: 0, negDays: 0, over: false, // 빚, 자금이 마이너스로 끝난 날 수, 파산
   mon: null, // 이번 달 누계(월 결산)
-};
+});
+const G = freshState();
 function newToday() { return { interest: 0, pax: 0, transfers: 0, revenue: 0, cost: 0, potential: 0, spawned: 0, satSum: 0, satN: 0, gaveUp: 0, leftBehind: 0, trainKm: 0, bought: 0 }; }
 G.today = newToday();
 // 달력: 실제 달력. day 1 = CFG.startDate
@@ -842,6 +844,13 @@ function deserialize(s) {
   G.depot = o.depot.concat(G.depot.filter(x => !o.depot.some(y => y.id === x.id)));
   rebuildNetwork();
 }
+// 게임을 처음 상태로(새 게임·불러오기 전에)
+function resetGame() {
+  Object.assign(G, freshState());
+  G.today = newToday(); G.mon = newMonth();
+  spawnAcc.clear(); baseWeight.clear();
+  rebuildNetwork();
+}
 function setupNewGame() {
   const st = CFG.starter;
   for (const n of st.stations) buyStation(byName.get(n), true);
@@ -850,7 +859,7 @@ function setupNewGame() {
   rebuildNetwork();
 }
 
-root.SIM = { CFG, D, G, routeDiag, upgradeBlock, dateOf, isMonthEnd, monthReport, startMonth, assetValue, creditGrade, loanLimit, canBorrow, borrow, repay, stations, byName, lines, edges, adj, sections, secById, edgeOwned, stOwned, secOwned, stationPrice, buyStation,
+root.SIM = { CFG, D, G, resetGame, routeDiag, upgradeBlock, dateOf, isMonthEnd, monthReport, startMonth, assetValue, creditGrade, loanLimit, canBorrow, borrow, repay, stations, byName, lines, edges, adj, sections, secById, edgeOwned, stOwned, secOwned, stationPrice, buyStation,
   sectionPrice, buySection, missingSections, buySections, ownedKm, regionName, toKm, distKm, isOpen, lineElec, lineDbl, lineVmax, edgeOpen, edgeCap,
   kindOf, tierOf, needsElec, edgeAllowed, findPath, buildLegs, addRoute, routeTitle, routeKm, routeHasNonElec, routeOpen, routeTrains,
   legMinutes, edgeSpeed, cycleMinutes, headway, rideMinutes, rideKm, rebuildNetwork, planFrom, hourShare, peakAt, tick, satPct, closeDay, startNextDay,

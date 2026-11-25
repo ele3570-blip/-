@@ -151,12 +151,26 @@
   #legend i { display: inline-block; width: 16px; height: 4px; border-radius: 2px; }
   #legend i.dash { background: repeating-linear-gradient(90deg, #a16207 0 5px, transparent 5px 8px); }
   @media (max-width: 640px) { #legend { top: auto; bottom: 74px; left: 8px; right: 8px; font-size: 11px; } #legend .lgrow { gap: 6px; } }
+  #homeBtn { padding: 4px 8px; flex: none; }
+  #home { position: fixed; inset: 0; z-index: 4; display: flex; align-items: center; justify-content: center; padding: 16px;
+    background: linear-gradient(160deg, rgba(219,234,254,.96), rgba(253,226,228,.96)); overflow-y: auto; }
+  #home[hidden] { display: none; }
+  .homebox { width: 100%; max-width: 420px; text-align: center; }
+  .homelogo { font-size: 56px; line-height: 1; }
+  #home h1 { margin: 8px 0 4px; font-size: 30px; letter-spacing: -.02em; }
+  .homebtn { display: block; width: 100%; margin: 0 0 10px; padding: 14px 16px; font-size: 17px; font-weight: 700; border-radius: 12px; text-align: left; }
+  .homebtn small { display: block; font-size: 12px; font-weight: 400; opacity: .85; margin-top: 2px; }
+  .slot { background: #fff; border: 1px solid var(--line); border-radius: 12px; padding: 10px 12px; margin-bottom: 8px; text-align: left; }
+  .slot .btns { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+  .slot .btns button { padding: 6px 10px; }
+  #home textarea, #modal textarea { width: 100%; min-height: 90px; font: 12px/1.4 monospace; border: 1px solid #d1d5db; border-radius: 8px; padding: 6px; }
   .stops span.pass { color: var(--muted); border-style: dashed; }
 </style>
 </head>
 <body>
 <div id="app">
   <div id="topbar">
+    <button id="homeBtn" title="홈 (저장하고 나가기)">🏠</button>
     <span class="stat">📅 <b id="day">2026년 1월 1일 (목)</b></span>
     <span class="stat">🕐 <b id="clock">05:00</b></span>
     <span class="stat">💰 <b id="money">0</b></span>
@@ -229,6 +243,16 @@
   </div>
 </div>
 <div id="modal"><div class="box" id="modalBox"></div></div>
+<!-- 홈 화면: 이어하기 · 새 게임 · 불러오기 -->
+<div id="home" hidden>
+  <div class="homebox">
+    <div class="homelogo">🚄</div>
+    <h1>전국 철도 경영</h1>
+    <p class="muted" style="margin:0 0 18px">동대구역과 무궁화호 한 대로 시작하는 철도 회사</p>
+    <div id="homeMain"></div>
+    <div id="homeSlots" hidden></div>
+  </div>
+</div>
 <script src="data.js"></script>
 <script src="sim.js"></script>
 <script src="ui.js"></script>
