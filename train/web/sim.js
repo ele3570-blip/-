@@ -454,12 +454,14 @@ function arrive(t) {
       }
       if (!opt) { left.push(p); continue; }
       if (t.pax.length >= tier.cap) {
+        rs(r).full++;
         if (!p.leftBehind) { p.leftBehind = true; G.today.leftBehind++; r.leftToday = (r.leftToday || 0) + 1; }
         left.push(p); continue;
       }
       const fare = fareFor(tier, rideKm(r, t.i, j));
       G.money += fare; G.today.revenue += fare; r.revToday = (r.revToday || 0) + fare;
       if (!p.paid) { p.paid = true; recordSat(G.t - p.start, tier.comfort); }
+      { const st = rs(r); st.board++; st.waitSum += G.t - p.since; }
       t.pax.push({ dest: p.dest, j, next: opt.x != null ? opt.r2 : null, start: p.start });
       moved++;
     }
@@ -500,6 +502,7 @@ function stepTrains(dt) {
         let c = leg.km * tier.perKm;
         for (const e of leg.edges) if (e.line.kind === 'hs') c += e.km * CFG.hsTrackFeePerKm;
         G.money -= c; G.today.cost += c; G.today.trainKm += leg.km; t.route.costToday = (t.route.costToday || 0) + c;
+        const st = rs(t.route); st.seatKm += leg.km * tier.cap; st.paxKm += leg.km * t.pax.length; st.peakLoad = Math.max(st.peakLoad, t.pax.length / tier.cap);
         t.i = j; t.dir = dir; t.legT = 0; t.legDur = null;
         arrive(t);
       }
@@ -511,6 +514,7 @@ function giveUps() {
     if (!q.length) continue;
     const keep = q.filter(p => G.t - p.since <= p.patience);
     const n = q.length - keep.length;
+    if (n) for (const p of q) if (G.t - p.since > p.patience) { const r = p.opts?.[0]?.r; if (r) rs(r).gave++; }
     if (n) { G.today.gaveUp += n; G.today.satN += n; }
     G.waiting.set(sid, keep);
   }
@@ -589,7 +593,32 @@ function startNextDay() {
   G.day++; G.t = CFG.dayStartMin; G.today = newToday();
   G.waiting = new Map(); spawnAcc.clear();
   for (const t of G.trains) t.pax = [];
-  for (const r of G.routes) { r.paxToday = 0; r.revToday = 0; r.costToday = 0; r.leftToday = 0; r.lastDep = {}; }
+  for (const r of G.routes) { r.paxToday = 0; r.revToday = 0; r.costToday = 0; r.leftToday = 0; r.lastDep = {}; r.yest = r.st; r.st = null; }
+}
+
+// ───────────────────────── 노선 진단: 열차가 더 필요한가 ─────────────────────────
+// 노선 하루 기록: 좌석km·승객km(승차율), 탄 승객·대기 시간, 만석으로 못 탄 횟수, 기다리다 떠난 승객
+function rs(r) { return r.st || (r.st = { seatKm: 0, paxKm: 0, peakLoad: 0, board: 0, waitSum: 0, full: 0, gave: 0 }); }
+// 판정: 오늘 기록이 적으면(오전) 어제 기록으로
+function routeDiag(r) {
+  const n = routeTrains(r).length;
+  if (!n) return { level: 'none', label: '열차 없음', icon: '⚪', advice: '열차를 배차하세요' };
+  const today = r.st, useY = (!today || today.board < 20) && r.yest && r.yest.board >= 20;
+  const st = useY ? r.yest : today;
+  if (!st || st.board < 5) return { level: 'wait', label: '집계 중', icon: '⏳', advice: '운행 기록이 쌓이면 알려 드립니다', n };
+  const occ = st.seatKm ? st.paxKm / st.seatKm : 0, wait = st.board ? st.waitSum / st.board : 0;
+  const gaveRate = st.gave / Math.max(1, st.gave + st.board), fullRate = st.full / Math.max(1, st.board);
+  const hw = headway(r), hw1 = cycleMinutes(r) / (n + 1), hwm = n > 1 ? cycleMinutes(r) / (n - 1) : Infinity;
+  const base = { n, occ, wait, gaveRate, fullRate, st, hw, hw1, hwm, from: useY ? '어제' : '오늘' };
+  if (fullRate > 0.05 || st.peakLoad >= 0.98 && occ > 0.6)
+    return { ...base, level: 'more', icon: '🔴', label: '열차 부족(만석)', advice: `만석이라 못 탄 승객이 있습니다. 열차를 더 넣거나 정원이 큰 등급으로 올리세요` };
+  if (gaveRate > 0.2 && hw > 45)
+    return { ...base, level: 'more', icon: '🟠', label: '배차 간격이 김', advice: `기다리다 떠나는 승객이 ${Math.round(gaveRate * 100)}%입니다. 1대 더 넣으면 배차 ${Math.round(hw)}분 → ${Math.round(hw1)}분` };
+  if (occ < 0.15 && n >= 2)
+    return { ...base, level: 'less', icon: '🟡', label: '열차가 남음', advice: `승차율이 ${Math.round(occ * 100)}%로 낮습니다. 1대 빼도 됩니다(배차 ${Math.round(hw)}분 → ${Math.round(hwm)}분)` };
+  if (occ < 0.15 && n === 1)
+    return { ...base, level: 'low', icon: '🟡', label: '승객 적음', advice: `승차율이 ${Math.round(occ * 100)}%입니다. 열차를 늘릴 필요는 없고, 큰 역까지 늘리거나 정차역을 바꿔 보세요` };
+  return { ...base, level: 'ok', icon: '🟢', label: '적당', advice: gaveRate > 0.1 ? `1대 더 넣으면 배차 ${Math.round(hw)}분 → ${Math.round(hw1)}분으로 승객이 조금 늘어납니다` : '지금 열차 수가 알맞습니다' };
 }
 
 // ───────────────────────── 조작 ─────────────────────────
@@ -821,7 +850,7 @@ function setupNewGame() {
   rebuildNetwork();
 }
 
-root.SIM = { CFG, D, G, upgradeBlock, dateOf, isMonthEnd, monthReport, startMonth, assetValue, creditGrade, loanLimit, canBorrow, borrow, repay, stations, byName, lines, edges, adj, sections, secById, edgeOwned, stOwned, secOwned, stationPrice, buyStation,
+root.SIM = { CFG, D, G, routeDiag, upgradeBlock, dateOf, isMonthEnd, monthReport, startMonth, assetValue, creditGrade, loanLimit, canBorrow, borrow, repay, stations, byName, lines, edges, adj, sections, secById, edgeOwned, stOwned, secOwned, stationPrice, buyStation,
   sectionPrice, buySection, missingSections, buySections, ownedKm, regionName, toKm, distKm, isOpen, lineElec, lineDbl, lineVmax, edgeOpen, edgeCap,
   kindOf, tierOf, needsElec, edgeAllowed, findPath, buildLegs, addRoute, routeTitle, routeKm, routeHasNonElec, routeOpen, routeTrains,
   legMinutes, edgeSpeed, cycleMinutes, headway, rideMinutes, rideKm, rebuildNetwork, planFrom, hourShare, peakAt, tick, satPct, closeDay, startNextDay,

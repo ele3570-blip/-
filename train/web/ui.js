@@ -372,6 +372,16 @@ function routeStopsHtml(r) {
   return `<div class="stops">${seq.map(id => `<span class="${stopSet.has(id) ? '' : 'pass'}">${esc(stations[id].name)}</span>`).join('')}</div>`;
 }
 // 노선이 지나는 선로: 종류별 km 막대와 선로 순서(예: 경부선 전철 45km → 경부고속선 120km)
+// 노선 진단 상자: 열차가 더 필요한지
+const DIAG_BG = { more: '#fef2f2', less: '#fefce8', low: '#fefce8', ok: '#f0fdf4', none: '#f8fafc', wait: '#f8fafc' };
+function diagHtml(r) {
+  const x = S.routeDiag(r);
+  const nums = x.occ != null ? `<div class="muted" style="font-size:12px;margin-top:3px">${x.from} 기준 · 승차율 ${Math.round(x.occ * 100)}% · 평균 대기 ${Math.round(x.wait)}분 · 기다리다 떠남 ${Math.round(x.gaveRate * 100)}% · 만석 ${Math.round(x.fullRate * 100)}%</div>` : '';
+  const btn = x.level === 'more' ? `<button class="primary" data-${G.depot.some(t => t.kind === r.kind) ? 'add' : 'buyadd'}="${r.no}" style="margin-top:6px">＋ 1대 더 넣기</button>`
+    : x.level === 'less' ? `<button data-recall="${S.routeTrains(r).slice(-1)[0].id}" style="margin-top:6px">－ 1대 빼기</button>` : '';
+  return `<div style="background:${DIAG_BG[x.level]};border:1px solid var(--line);border-radius:8px;padding:7px 9px;margin:6px 0">
+    <b>${x.icon} ${x.label}</b> <span style="font-size:12px">${esc(x.advice)}</span>${nums}${btn}</div>`;
+}
 function trackTags(r) {
   const has = new Set(); for (const leg of r.legs) for (const e of leg.edges) has.add(trackType(e));
   return ['hs', 'elec', 'diesel'].filter(k => has.has(k)).map(k => `<span style="color:${TRACK[k].color};font-weight:700">${{ hs: '고속', elec: '전철', diesel: '비전철' }[k]}</span>`).join('/');
@@ -398,6 +408,7 @@ function routeHtml(r) {
   let h = `<div><span class="sw" style="display:inline-block;width:12px;height:12px;border-radius:3px;background:${r.color};vertical-align:-1px"></span>
     <b style="font-size:15px">${K.icon} ${esc(S.routeTitle(r))}</b> <span class="tag gray">${K.name}</span></div>
     <div class="muted">${fmt(S.routeKm(r))}km · 정차 ${r.stops.length}역 · 편도 ${minTxt(oneWay)} · ${ts.length ? `배차 ${minTxt(hw)}마다` : '열차 없음'}</div>
+    ${diagHtml(r)}
     ${routeTracksHtml(r)}
     ${routeStopsHtml(r)}
     <div>오늘 승객 <b>${fmt(r.paxToday || 0)}</b>명 · 수입 ${won(r.revToday || 0)} · 운행비 ${won(r.costToday || 0)} · <span class="${profit >= 0 ? 'pos' : 'neg'}">${won(profit)}</span></div>
@@ -502,7 +513,7 @@ function renderRoutes() {
   $('routes').innerHTML = G.routes.map(r => {
     const ts = S.routeTrains(r), p = (r.revToday || 0) - (r.costToday || 0);
     return `<div class="route" data-route="${r.no}"><span class="sw" style="background:${r.color}"></span>
-      <span class="nm"><b>${kindIcon(r.kind)} ${esc(S.routeTitle(r))}</b><br>
+      <span class="nm"><b>${kindIcon(r.kind)} ${esc(S.routeTitle(r))}</b> <span style="font-size:12px">${(d => `${d.icon} ${d.label}`)(S.routeDiag(r))}</span><br>
       <span class="meta">${fmt(S.routeKm(r))}km ${trackTags(r)} · ${r.stops.length}역 · 열차 ${ts.length}대 · 오늘 ${fmt(r.paxToday || 0)}명 · <span class="${p >= 0 ? 'pos' : 'neg'}">${won(p)}</span></span></span></div>`;
   }).join('') || '<p class="muted">노선이 없습니다.</p>';
 }
@@ -614,6 +625,7 @@ function renderHelp() {
     · 선로마다 시간당 다닐 수 있는 열차 수가 정해져 있습니다(단선 ${CFG.capSingle} · 복선 ${CFG.capDouble} · 고속선 ${CFG.capHs}). 넘치면 빨갛게 표시되고 느려집니다<br>
     · 역 크기 = 실제 하루 승차 인원(2025, 코레일). 게임 승객 1명 = 실제 ${Math.round(1 / CFG.demandScale)}명<br>
     · 역을 누르면 그 역 사람들이 가고 싶은 곳이 나옵니다. 아직 안 열린 지역으로 가려는 사람이 많으면 지역을 여세요<br>
+    · 열차가 더 필요한지: 노선 카드 맨 위 판정을 보세요. 🔴 만석 = 열차 추가나 큰 등급, 🟠 배차 간격이 김 = 열차 추가, 🟡 남음 = 1대 빼도 됨, 🟢 적당<br>
     · 빠를수록(자동차보다), 자주 다닐수록 승객이 늘고, 오래 기다리면 떠납니다<br>
     · 승객은 한 번까지 갈아탑니다(예: 대경선 → 동대구 → KTX). 요금은 탄 열차마다 냅니다<br>
     · 🚧 건설 중인 노선(충청권 광역철도, 부전–마산 등)은 추후 업데이트로 추가됩니다<br>
