@@ -45,6 +45,12 @@ const CFG = {
   walkKm: 0.4,               // 목적지까지 걸어갈 수 있는 거리
   minTripKm: 0.7,
   tripDecayKm: 5,
+  // 출퇴근 피크: 실제 시간대 비율에 곱하는 배율. 앞뒤 30분은 서서히 올라가고 내려감
+  peaks: [
+    { name: '출근', icon: '🌅', from: 7 * 60, to: 9 * 60, mult: 3.2 },
+    { name: '퇴근', icon: '🌆', from: 17 * 60, to: 19 * 60 + 30, mult: 2.7 },
+  ],
+  offPeakMult: 0.75, peakRampMin: 30,
   maxWaitMin: 40,            // 만족도 0이 되는 대기 시간
   patienceMin: 8, patienceExtraMean: 12, patienceMax: 45, // 참을성(분) = 최소 + 무작위(평균 extra)
   freqBase: 0.45, freqBonus: 0.85, freqScaleMin: 12, // 배차 간격 h분 → 수요 배율 = base + bonus·e^(-h/scale)
@@ -282,7 +288,7 @@ const G = {
   owned: new Set(), // 보유한 정류장
   depot: [], nextBusId: 1, // 차고지에 있는 버스
 };
-function newToday() { return { pax: 0, revenue: 0, cost: 0, potential: 0, spawned: 0, satSum: 0, satN: 0, gaveUp: 0, busBought: 0 }; }
+function newToday() { return { pax: 0, revenue: 0, cost: 0, potential: 0, spawned: 0, satSum: 0, satN: 0, gaveUp: 0, busBought: 0, leftBehind: 0, peakPax: 0 }; }
 G.today = newToday();
 
 const isOpen = s => G.unlocked.has(s.gu);
@@ -389,6 +395,20 @@ function planFrom(oid, dest) {
 // ───────────────────────── 시뮬레이션 ─────────────────────────
 const spawnAcc = new Map();
 
+// 지금 시각의 피크 배율과 피크 정보
+function peakAt(t) {
+  let best = { mult: CFG.offPeakMult, peak: null };
+  for (const pk of CFG.peaks) {
+    const R = CFG.peakRampMin;
+    let f = 0;
+    if (t >= pk.from && t <= pk.to) f = 1;
+    else if (t > pk.from - R && t < pk.from) f = (t - (pk.from - R)) / R;
+    else if (t > pk.to && t < pk.to + R) f = 1 - (t - pk.to) / R;
+    const m = CFG.offPeakMult + (pk.mult - CFG.offPeakMult) * f;
+    if (m > best.mult) best = { mult: m, peak: f >= 1 ? pk : null };
+  }
+  return best;
+}
 function hourShare(t) {
   const h = Math.floor(t / 60) - D.hourStart;
   return D.hourly[Math.max(0, Math.min(D.hourly.length - 1, h))] || 0;
@@ -417,7 +437,7 @@ function patience() {
 }
 
 function spawn(dt) {
-  const share = hourShare(G.t);
+  const share = hourShare(G.t) * peakAt(G.t).mult;
   const mult = new Map();
   for (const sid of servedBy.keys()) mult.set(sid, stopFreqMult(sid) * G.rep);
   for (const s of openStops) {
@@ -486,7 +506,11 @@ function arrive(b) {
   if (q && q.length) {
     const left = [];
     for (const p of q) {
-      if (b.pax.length >= busTier(b).cap) { left.push(p); continue; }
+      if (b.pax.length >= busTier(b).cap) {
+        // 만차: 이 버스를 타려던 승객은 못 타고 남음
+        if (!p.leftBehind && p.options.some(o => o.route === b.route && heading(b, b.i, o.alight))) { p.leftBehind = true; G.today.leftBehind++; }
+        left.push(p); continue;
+      }
       const opt = p.options.find(o => o.route === b.route && heading(b, b.i, o.alight));
       if (!opt) { left.push(p); continue; }
       p.plan = opt;
@@ -572,6 +596,7 @@ function endDay() {
     <table>
       <tr><td>수송 승객</td><td>${fmt(T.pax)}명</td></tr>
       <tr><td>포기한 승객</td><td>${fmt(T.gaveUp)}명</td></tr>
+      <tr><td>만차로 못 탄 승객</td><td class="${T.leftBehind ? 'neg' : ''}">${fmt(T.leftBehind)}명</td></tr>
       <tr><td>수요 충족률</td><td>${cover.toFixed(1)}%</td></tr>
       <tr><td>만족도</td><td>${sat == null ? '-' : sat.toFixed(0) + '%'}</td></tr>
       <tr><td>평판 (내일 수요)</td><td>${(G.rep * 100).toFixed(0)}% <span class="${repDiff >= 0 ? 'pos' : 'neg'}">(${repDiff >= 0 ? '+' : ''}${repDiff.toFixed(1)})</span></td></tr>
@@ -582,6 +607,7 @@ function endDay() {
       <tr><td><b>순이익</b></td><td class="${profit + subsidy >= 0 ? 'pos' : 'neg'}"><b>${won(profit + subsidy)}</b></td></tr>
       <tr><td>보유 자금</td><td>${won(G.money)}</td></tr>
     </table>
+    ${T.leftBehind > 30 ? `<p class="muted">출퇴근 피크에 만차로 못 탄 승객이 많았습니다. 붐비는 노선에 버스를 더 넣거나 큰 버스로 업그레이드하세요.</p>` : ''}
     ${profit < 0 && !subsidy ? `<p class="muted">적자인데 만족도가 ${CFG.subsidyMinSat}% 미만이라 보조금을 받지 못했습니다.</p>` : ''}
     <button class="primary" id="nextDay" style="width:100%">${G.day + 1}일차 시작</button>`);
   document.getElementById('nextDay').onclick = () => {
@@ -1194,6 +1220,9 @@ function renderTop() {
   const s = satPct();
   $('sat').textContent = s == null ? '-' : s.toFixed(0) + '%';
   $('rep').textContent = (G.rep * 100).toFixed(0) + '%';
+  const pk = peakAt(G.t).peak, pe = $('peak');
+  pe.textContent = pk ? `${pk.icon} ${pk.name} 피크` : '';
+  pe.style.display = pk ? '' : 'none';
   $('cover').textContent = G.today.potential > 1 ? (G.today.pax / G.today.potential * 100).toFixed(0) + '%' : '-';
   let waiting = 0; for (const q of G.waiting.values()) waiting += q.length;
   $('todayStat').textContent = `오늘 수송 ${fmt(G.today.pax)}명 · 대기 ${fmt(waiting)}명 · 수입 ${won(G.today.revenue)} · 운영비 ${won(G.today.cost)}`;
@@ -1429,5 +1458,5 @@ if (!loaded) {
   $('startBtn').onclick = () => { hideModal(); G.paused = false; setSpeedUI(); save(); };
 }
 window.__G = G; // 디버그/테스트용
-window.__api = { roadPath, buyBus, dispatch, recall, sellBus, buyStop, upgradeBus, stopPrice, setupNewGame, startEdit, editClick, applyEdit, addRoute, unlock, tick, stops, endDay, toScreen: s => [sx(s.x), sy(s.y)] };
+window.__api = { busCap: b => busTier(b).cap, roadPath, buyBus, dispatch, recall, sellBus, buyStop, upgradeBus, stopPrice, setupNewGame, startEdit, editClick, applyEdit, addRoute, unlock, tick, stops, endDay, toScreen: s => [sx(s.x), sy(s.y)] };
 requestAnimationFrame(frame);
