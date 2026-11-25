@@ -53,6 +53,13 @@ function fitStations(ss, pad = 80) {
   cam.z = Math.max(0.6, Math.min(40, Math.min((W - pad * 2) / Math.max(5, x1 - x0), (H - pad * 2 - 80) / Math.max(5, y1 - y0))));
 }
 const land = S.D.land.map(ring => ring.map(([lon, lat]) => S.toKm(lon, lat)));
+// 선로 종류 색: 고속선 파랑, 전철 일반선 초록, 비전철 일반선 갈색 점선
+const TRACK = {
+  hs: { name: '고속선', color: '#2563eb', dash: [] },
+  elec: { name: '일반선(전철)', color: '#15803d', dash: [] },
+  diesel: { name: '일반선(비전철)', color: '#a16207', dash: [6, 4] },
+};
+const trackType = e => e.line.kind === 'hs' ? 'hs' : S.lineElec(e.line) ? 'elec' : 'diesel';
 // 지역 모양(km 좌표)과 색. 열린 지역은 지역마다 다른 옅은 색, 닫힌 지역은 회색 빗금
 const REGION_COLOR = { daegu: '#fde2e4', gyeongbuk_e: '#fff1c1', gyeongbuk_n: '#e2f0cb', busan: '#cde7f0', gyeongnam: '#d8f3dc',
   chungcheong: '#ffe5d0', chungbuk: '#e4dcf5', capital: '#fbd6e8', gangwon: '#d3f0e8', jeonbuk: '#f6eac2', jeonnam: '#dbe7fb' };
@@ -212,8 +219,9 @@ function draw() {
     if (!edgeVisible(e)) continue;
     const pts = edgeScreen(e, 0);
     ctx.globalAlpha = !open ? 0.3 : own ? 1 : 0.55;
-    ctx.setLineDash(el ? [] : [5, 4]);
-    ctx.strokeStyle = hs ? '#1f2937' : el ? '#6b7280' : '#9ca3af';
+    const T = TRACK[hs ? 'hs' : el ? 'elec' : 'diesel'];
+    ctx.setLineDash(T.dash);
+    ctx.strokeStyle = T.color;
     ctx.lineWidth = (hs ? 3.2 : dbl ? 2.4 : 1.6) * (own ? 1 : 0.6);
     strokePts(pts);
     const l = load.get(e.id) || 0, cap = S.edgeCap(e);
@@ -237,6 +245,16 @@ function draw() {
   }
   // 노선
   const selRoute = selected?.type === 'route' ? selected.r : null;
+  if (selRoute) { // 선택한 노선 밑에 선로 종류 색을 넓게 깔아 어디가 고속선·전철·비전철인지 보이게
+    ctx.lineCap = 'round'; ctx.lineJoin = 'round'; ctx.globalAlpha = 0.55;
+    for (const leg of selRoute.legs) for (const e of leg.edges) {
+      if (!edgeVisible(e)) continue;
+      const T = TRACK[trackType(e)];
+      ctx.strokeStyle = T.color; ctx.lineWidth = 13; ctx.setLineDash(T.dash.length ? [10, 6] : []);
+      strokePts(edgeScreen(e, edgeOffset(e, selRoute)));
+    }
+    ctx.setLineDash([]); ctx.globalAlpha = 1;
+  }
   for (const r of G.routes) {
     const dim = selRoute && selRoute !== r;
     ctx.globalAlpha = dim ? 0.25 : r.active ? 1 : 0.5;
@@ -353,6 +371,25 @@ function routeStopsHtml(r) {
   for (const leg of r.legs) seq.push(...leg.nodes.slice(1));
   return `<div class="stops">${seq.map(id => `<span class="${stopSet.has(id) ? '' : 'pass'}">${esc(stations[id].name)}</span>`).join('')}</div>`;
 }
+// 노선이 지나는 선로: 종류별 km 막대와 선로 순서(예: 경부선 전철 45km → 경부고속선 120km)
+function trackTags(r) {
+  const has = new Set(); for (const leg of r.legs) for (const e of leg.edges) has.add(trackType(e));
+  return ['hs', 'elec', 'diesel'].filter(k => has.has(k)).map(k => `<span style="color:${TRACK[k].color};font-weight:700">${{ hs: '고속', elec: '전철', diesel: '비전철' }[k]}</span>`).join('/');
+}
+function routeTracksHtml(r) {
+  const km = { hs: 0, elec: 0, diesel: 0 }, runs = [];
+  for (const leg of r.legs) for (const e of leg.edges) {
+    const t = trackType(e); km[t] += e.km;
+    const last = runs[runs.length - 1];
+    if (last && last.line === e.line) last.km += e.km; else runs.push({ line: e.line, t, km: e.km });
+  }
+  const tot = km.hs + km.elec + km.diesel || 1;
+  const bar = Object.keys(km).filter(k => km[k] > 0).map(k => `<i style="width:${km[k] / tot * 100}%;background:${TRACK[k].color}${k === 'diesel' ? `;background-image:repeating-linear-gradient(90deg,transparent 0 6px,rgba(255,255,255,.55) 6px 9px)` : ''}"></i>`).join('');
+  const legend = Object.keys(km).filter(k => km[k] > 0).map(k => `<span style="white-space:nowrap"><span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:${TRACK[k].color};vertical-align:-1px"></span> ${TRACK[k].name} ${fmt(km[k])}km</span>`).join(' · ');
+  return `<div style="margin:6px 0 2px;display:flex;height:10px;border-radius:5px;overflow:hidden;background:#e5e7eb">${bar}</div>
+    <div style="font-size:12px">${legend}</div>
+    <div class="muted" style="font-size:12px;margin-top:2px">${runs.map(x => `<span style="color:${TRACK[x.t].color};font-weight:600">${esc(x.line.name)}</span> ${fmt(x.km)}km`).join(' → ')}</div>`;
+}
 function routeHtml(r) {
   const ts = S.routeTrains(r), K = CFG.kinds[r.kind];
   const oneWay = S.rideMinutes(r, 0, r.stops.length - 1), hw = S.headway(r);
@@ -361,6 +398,7 @@ function routeHtml(r) {
   let h = `<div><span class="sw" style="display:inline-block;width:12px;height:12px;border-radius:3px;background:${r.color};vertical-align:-1px"></span>
     <b style="font-size:15px">${K.icon} ${esc(S.routeTitle(r))}</b> <span class="tag gray">${K.name}</span></div>
     <div class="muted">${fmt(S.routeKm(r))}km · 정차 ${r.stops.length}역 · 편도 ${minTxt(oneWay)} · ${ts.length ? `배차 ${minTxt(hw)}마다` : '열차 없음'}</div>
+    ${routeTracksHtml(r)}
     ${routeStopsHtml(r)}
     <div>오늘 승객 <b>${fmt(r.paxToday || 0)}</b>명 · 수입 ${won(r.revToday || 0)} · 운행비 ${won(r.costToday || 0)} · <span class="${profit >= 0 ? 'pos' : 'neg'}">${won(profit)}</span></div>
     <div>기다리는 승객 ${fmt(waiting)}명${r.leftToday ? ` · <span class="neg">만석으로 못 탄 승객 ${fmt(r.leftToday)}명</span>` : ''}</div>`;
@@ -465,7 +503,7 @@ function renderRoutes() {
     const ts = S.routeTrains(r), p = (r.revToday || 0) - (r.costToday || 0);
     return `<div class="route" data-route="${r.no}"><span class="sw" style="background:${r.color}"></span>
       <span class="nm"><b>${kindIcon(r.kind)} ${esc(S.routeTitle(r))}</b><br>
-      <span class="meta">${fmt(S.routeKm(r))}km · ${r.stops.length}역 · 열차 ${ts.length}대 · 오늘 ${fmt(r.paxToday || 0)}명 · <span class="${p >= 0 ? 'pos' : 'neg'}">${won(p)}</span></span></span></div>`;
+      <span class="meta">${fmt(S.routeKm(r))}km ${trackTags(r)} · ${r.stops.length}역 · 열차 ${ts.length}대 · 오늘 ${fmt(r.paxToday || 0)}명 · <span class="${p >= 0 ? 'pos' : 'neg'}">${won(p)}</span></span></span></div>`;
   }).join('') || '<p class="muted">노선이 없습니다.</p>';
 }
 let depotRouteNo = null;
@@ -572,7 +610,7 @@ function renderHelp() {
     · 🚃 일반열차: 무궁화호 → ITX-새마을 → ITX-마음(전철화 선로만)<br>
     · 🚈 광역열차: 대경선 같은 지역 통근열차. 싸고 많이 타지만 요금이 낮음. 전철화 선로만<br>
     · 🚄 고속열차: KTX-이음 → KTX-산천 → KTX-청룡. 고속선과 전철화된 일반선<br>
-    · 실선 = 전철화, 점선 = 비전철, 굵은 검은 선 = 고속선<br>
+    · 선로 색: 파랑 = 고속선(KTX만), 초록 = 전철 일반선, 갈색 점선 = 비전철 일반선(무궁화·새마을만). 노선을 누르면 지나는 선로 종류가 색 띠와 km로 나옵니다<br>
     · 선로마다 시간당 다닐 수 있는 열차 수가 정해져 있습니다(단선 ${CFG.capSingle} · 복선 ${CFG.capDouble} · 고속선 ${CFG.capHs}). 넘치면 빨갛게 표시되고 느려집니다<br>
     · 역 크기 = 실제 하루 승차 인원(2025, 코레일). 게임 승객 1명 = 실제 ${Math.round(1 / CFG.demandScale)}명<br>
     · 역을 누르면 그 역 사람들이 가고 싶은 곳이 나옵니다. 아직 안 열린 지역으로 가려는 사람이 많으면 지역을 여세요<br>
