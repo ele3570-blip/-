@@ -3,7 +3,7 @@
 //   예) node train/scripts/sim_check.js 3 동대구,구미
 //       node train/scripts/sim_check.js 5 +gyeongnam +busan general:동대구,밀양,부산 ktx:동대구,울산,부산*2
 //   종류 생략 = general. 필요한 역·구간은 자동으로 사고, 첫 일반열차는 차량기지의 무궁화호를 씀
-//   MONEY=1e9 처럼 시작 자금을 바꿀 수 있음
+//   loan=40000000 → 그 시점에 대출. MONEY=1e9 처럼 시작 자금을 바꿀 수 있음
 const fs = require('fs'), vm = require('vm'), path = require('path');
 const ctx = { console, Math, JSON, Map, Set, Object, Array, Number, Infinity }; ctx.globalThis = ctx; vm.createContext(ctx);
 for (const f of ['data.js', 'sim.js']) vm.runInContext(fs.readFileSync(path.join(__dirname, '..', 'web', f), 'utf8').replace('window.GAME_DATA', 'globalThis.GAME_DATA'), ctx);
@@ -14,6 +14,7 @@ if (process.env.MONEY) G.money = +process.env.MONEY;
 const m = x => (x / 1e4).toFixed(0) + '만';
 console.log(`시작 자금 ${m(G.money)}`);
 for (const a of plan) {
+  if (a.startsWith('loan=')) { const r = S.borrow(+a.slice(5)); console.log(`대출 ${m(r.amount || 0)} ${r.err || ''} (등급 ${S.creditGrade()}, 한도 ${m(S.loanLimit())})`); continue; }
   if (a.startsWith('+')) { const r = S.unlockRegion(a.slice(1)); console.log(`지역 ${a.slice(1)}: ${r.err || '개방'}`); continue; }
   const [, kind = 'general', list, n = '1'] = a.match(/^(?:(\w+):)?([^*]+)(?:\*(\d+))?$/);
   const ids = list.split(',').map(s => { const st = S.byName.get(s); if (!st) throw new Error('역 없음: ' + s); return st.id; });
@@ -31,7 +32,7 @@ console.log(`투자 후 자금 ${m(G.money)} · 노선 ${G.routes.length} · 열
 for (let d = 0; d < +days; d++) {
   while (G.t < S.CFG.dayEndMin) S.tick(0.25);
   const R = S.closeDay();
-  console.log(`${R.day}일차: 승객 ${R.pax} (환승 ${R.transfers}, 떠남 ${R.gaveUp}, 만석 ${R.leftBehind}) 만족 ${R.sat == null ? '-' : R.sat.toFixed(0)}% 수입 ${m(R.revenue)} 비용 ${m(R.cost)} 이익 ${m(R.profit + R.pso)} 자금 ${m(R.money)}`);
+  console.log(`${R.day}일차: 승객 ${R.pax} (환승 ${R.transfers}, 떠남 ${R.gaveUp}, 만석 ${R.leftBehind}) 만족 ${R.sat == null ? '-' : R.sat.toFixed(0)}% 수입 ${m(R.revenue)} 비용 ${m(R.cost)} 이익 ${m(R.profit + R.pso - R.interest)} (이자 ${m(R.interest)}) 자금 ${m(R.money)} 빚 ${m(G.debt)} 등급 ${S.creditGrade()}${R.negDays ? ' 마이너스 ' + R.negDays + '일' : ''}${R.sold.length ? ' 강제매각 ' + R.sold.length : ''}${R.over ? ' 파산' : ''}`);
   for (const r of G.routes) console.log(`   ${S.routeTitle(r)}: 승객 ${r.paxToday || 0} 수입 ${m(r.revToday || 0)} 운행비 ${m(r.costToday || 0)} 열차 ${S.routeTrains(r).length}`);
   S.startNextDay();
 }

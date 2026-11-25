@@ -359,7 +359,7 @@ function renderInfo() {
 }
 
 // ───────────────────────── 설정창 ─────────────────────────
-const PANELS = { routes: '🛤️ 노선', depot: '🚉 차량기지', regions: '🗺️ 지역 개방', tracks: '🔧 선로', help: '❓ 도움말' };
+const PANELS = { routes: '🛤️ 노선', depot: '🚉 차량기지', regions: '🗺️ 지역 개방', tracks: '🔧 선로', bank: '🏦 은행', help: '❓ 도움말' };
 let openPanelName = null, panelBeforeMap = null;
 function openPanel(name) {
   openPanelName = name;
@@ -431,6 +431,38 @@ function renderTracks() {
   }).join('') + `<h3>🚧 건설 중·계획 노선 (추후 업데이트 예정)</h3>` + CFG.future.map(f =>
     `<div class="line" style="opacity:.75"><b>${esc(f.name)}</b> <span class="tag gray">${esc(f.state)}</span><br><span class="muted">${esc(f.where)}</span></div>`).join('');
 }
+function renderBank() {
+  const L = CFG.loan, g = S.creditGrade(), G0 = L.grades[g], lim = S.loanLimit(), can = S.canBorrow();
+  const h = G.history.slice(-7);
+  const prof = h.reduce((a, x) => a + x.revenue - x.cost + (x.pso || 0) - (x.interest || 0), 0);
+  const step = L.step;
+  $('bank').innerHTML = `
+    <div class="line" style="display:flex;align-items:center"><span class="grade ${g}">${g}</span>
+      <span>신용등급 <b>${g}</b> · 하루 이자 <b>${(G0.rate * 100).toFixed(2)}%</b><br><span class="muted">${esc(G0.desc)}</span></span></div>
+    <div class="bankgrid">
+      <span>빌린 돈</span><span>${won(G.debt)}</span>
+      <span>내일 낼 이자</span><span>${won(Math.round(G.debt * G0.rate))}</span>
+      <span>대출 한도</span><span>${won(lim)}</span>
+      <span>더 빌릴 수 있는 돈</span><span>${won(can)}</span>
+      <span class="muted">회사 자산 (열차·역·선로)</span><span class="muted">${won(S.assetValue())}</span>
+      <span class="muted">최근 ${h.length}일 손익 (이자 포함)</span><span class="${prof >= 0 ? 'pos' : 'neg'}">${h.length ? won(prof) : '-'}</span>
+    </div>
+    ${G.negDays ? `<p class="neg" style="margin:0 0 8px">⚠️ 자금 마이너스 ${G.negDays}일째. ${L.graceDays}일이 되면 열차를 강제로 팝니다.</p>` : ''}
+    <div class="wsub">빌리기</div>
+    <div class="bankbtns">
+      <button data-borrow="${step}" ${can < 1 ? 'disabled' : ''}>+${won(step)}</button>
+      <button data-borrow="${step * 5}" ${can < 1 ? 'disabled' : ''}>+${won(step * 5)}</button>
+      <button class="primary" data-borrow="max" ${can < 1 ? 'disabled' : ''}>한도까지</button>
+    </div>
+    <div class="wsub">갚기</div>
+    <div class="bankbtns">
+      <button data-repay="${step}" ${!G.debt || G.money <= 0 ? 'disabled' : ''}>-${won(step)}</button>
+      <button data-repay="${step * 5}" ${!G.debt || G.money <= 0 ? 'disabled' : ''}>-${won(step * 5)}</button>
+      <button data-repay="max" ${!G.debt || G.money <= 0 ? 'disabled' : ''}>${G.money >= G.debt ? '전부 갚기' : '가진 돈만큼'}</button>
+    </div>
+    <div class="legend">· 한도 = (${won(L.base)} + 자산 × ${L.assetRatio * 100}%) × 등급 배율<br>
+      ${Object.entries(L.grades).map(([k, v]) => `· <b>${k}</b>: 하루 ${(v.rate * 100).toFixed(2)}% · 한도 ×${v.limitMul} — ${esc(v.desc)}`).join('<br>')}</div>`;
+}
 function renderHelp() {
   $('helpText').innerHTML = `
     · 드래그: 지도 이동 / 휠: 확대·축소 / Space: 일시정지<br>
@@ -451,6 +483,8 @@ function renderHelp() {
     · 승객은 한 번까지 갈아탑니다(예: 대경선 → 동대구 → KTX). 요금은 탄 열차마다 냅니다<br>
     · 🚧 건설 중인 노선(충청권 광역철도, 부전–마산 등)은 추후 업데이트로 추가됩니다<br>
     · 요금은 거리 비례(일반 ${CFG.kinds.general.levels[0].fare[1]}원/km~, KTX ${CFG.kinds.ktx.levels[0].fare[1]}원/km~). 운행비는 달린 거리만큼, 고정비는 하루 단위<br>
+    · 🏦 은행: 회사 자산과 신용등급만큼 빌릴 수 있고, 하루 결산 때 이자를 냅니다. 흑자·만족도가 좋으면 등급이 올라 이자가 싸집니다<br>
+    · 자금이 마이너스인 채로 ${CFG.loan.graceDays}일을 마치면 은행이 비싼 열차부터 강제로 팔고, 그래도 모자라면 파산합니다<br>
     · 적자여도 만족도 ${CFG.psoMinSat}% 이상이면 공익서비스 보상금(적자의 ${CFG.psoRatio * 100}%)`;
 }
 function renderPanel() {
@@ -458,6 +492,7 @@ function renderPanel() {
   else if (openPanelName === 'depot') renderDepot();
   else if (openPanelName === 'regions') renderRegions();
   else if (openPanelName === 'tracks') renderTracks();
+  else if (openPanelName === 'bank') renderBank();
   else if (openPanelName === 'help') renderHelp();
 }
 function renderBadges() {
@@ -471,6 +506,7 @@ function renderTop() {
   $('clock').textContent = hhmm(G.t);
   $('money').textContent = won(G.money);
   $('money').style.color = G.money < 0 ? '#dc2626' : '';
+  $('debtStat').style.display = G.debt > 0 ? '' : 'none'; $('debt').textContent = won(G.debt);
   const sat = S.satPct(); $('sat').textContent = sat == null ? '-' : Math.round(sat) + '%';
   $('rep').textContent = Math.round(G.rep * 100) + '%';
   $('cover').textContent = G.today.potential ? (G.today.pax / G.today.potential * 100).toFixed(1) + '%' : '-';
@@ -734,7 +770,7 @@ window.addEventListener('keydown', e => {
   if (editing) { if (e.key === 'Enter') applyEdit(); else if (e.key === 'Escape') cancelEdit(); return; }
   if (e.key === ' ') { e.preventDefault(); G.paused = !G.paused; setSpeedUI(); }
   else if (e.key === 'Escape') { if (openPanelName) openPanel(null); else { selected = null; renderInfo(); } }
-  else if ('12345'.includes(e.key)) { const n = Object.keys(PANELS)[+e.key - 1]; openPanel(openPanelName === n ? null : n); }
+  else if ('123456'.includes(e.key)) { const n = Object.keys(PANELS)[+e.key - 1]; openPanel(openPanelName === n ? null : n); }
 });
 
 // 버튼(위임)
@@ -770,6 +806,9 @@ document.addEventListener('click', e => {
   else if (d.region && !e.target.closest('button')) fitStations(stations.filter(s => s.region === d.region));
   else if (d.buyst) { const st = stations[+d.buyst]; check(S.buyStation(st), `${st.name}역을 샀습니다`); }
   else if (d.buysec) { const sc = S.secById.get(d.buysec); check(S.buySection(sc), `${sc.line.name} ${S.regionName[sc.region]} 구간을 샀습니다`); }
+  else if (d.borrow) { const r = S.borrow(d.borrow === 'max' ? Infinity : +d.borrow); check(r, r.amount ? `${won(r.amount)}을 빌렸습니다` : ''); }
+  else if (d.repay) { const r = S.repay(d.repay === 'max' ? Infinity : +d.repay); check(r, r.amount ? `${won(r.amount)}을 갚았습니다` : ''); }
+  else if (d.newgame) { try { localStorage.removeItem(S.SAVE_KEY); } catch (e) { /* 없음 */ } location.reload(); }
   else if (d.lup) { const [id, what] = d.lup.split(':'); check(S.upgradeLine(lines.find(l => l.id === id), what), '공사를 마쳤습니다'); }
 });
 $('depotRoute').addEventListener('change', e => { depotRouteNo = +e.target.value || null; renderDepot(); });
@@ -803,13 +842,18 @@ function endDay() {
       <tr><td>운행비 (${fmt(R.trainKm)}열차km)</td><td class="neg">-${won(R.cost - R.fixed)}</td></tr>
       <tr><td>차량 고정비 (${G.trains.length}대)</td><td class="neg">-${won(R.fixed)}</td></tr>
       <tr><td>역·선로·열차 구입</td><td class="muted">${won(R.bought)} (투자)</td></tr>
+      ${R.interest ? `<tr><td>대출 이자 (등급 ${R.grade}, 빚 ${won(R.debt)})</td><td class="neg">-${won(R.interest)}</td></tr>` : ''}
       <tr><td>공익서비스 보상금</td><td class="pos">+${won(R.pso)}</td></tr>
-      <tr><td><b>순이익</b></td><td class="${total >= 0 ? 'pos' : 'neg'}"><b>${won(total)}</b></td></tr>
+      <tr><td><b>순이익</b></td><td class="${total - R.interest >= 0 ? 'pos' : 'neg'}"><b>${won(total - R.interest)}</b></td></tr>
       <tr><td>보유 자금</td><td>${won(G.money)}</td></tr>
     </table>
     ${R.leftBehind > 50 ? '<p class="muted">만석으로 못 탄 승객이 많았습니다. 붐비는 노선에 열차를 더 넣거나 등급을 올리세요.</p>' : ''}
     ${R.gaveUp > R.pax * 0.3 ? '<p class="muted">기다리다 떠난 승객이 많습니다. 배차 간격을 줄이세요.</p>' : ''}
-    <button class="primary" id="nextDay" style="width:100%">${R.day + 1}일차 시작</button>`);
+    ${R.negDays ? `<p class="neg">⚠️ 자금이 마이너스로 끝났습니다 (${R.negDays}일째). ${CFG.loan.graceDays}일이 되면 은행이 열차를 강제로 팝니다. 🏦 은행에서 빌리거나 적자 노선을 줄이세요.</p>` : ''}
+    ${R.sold.length ? `<p class="neg">🏦 은행이 열차를 강제로 팔았습니다: ${R.sold.map(x => `${esc(x.label)} (${won(x.value)})`).join(', ')}</p>` : ''}
+    ${R.over ? `<p class="neg"><b>파산했습니다.</b> 팔 열차가 없어 빚과 적자를 감당할 수 없습니다.</p><button class="primary" data-newgame="1" style="width:100%">새 게임</button>`
+      : `<button class="primary" id="nextDay" style="width:100%">${R.day + 1}일차 시작</button>`}`);
+  if (R.over) { save(); return; }
   $('nextDay').onclick = () => { hideModal(); S.startNextDay(); G.paused = false; setSpeedUI(); refreshAll(); };
 }
 
@@ -844,6 +888,7 @@ function frame(now) {
 resize();
 const loaded = load();
 if (!loaded) S.setupNewGame();
+if (G.over) setTimeout(() => { G.paused = true; showModal(`<h2 style="margin:0 0 8px">파산</h2><p>지난 게임은 파산으로 끝났습니다.</p><button class="primary" data-newgame="1" style="width:100%">새 게임</button>`); }, 0);
 S.rebuildNetwork(); assignSlots();
 fitStations(stations.filter(s => s.region === CFG.startRegion));
 renderTop(); renderBadges(); setSpeedUI();

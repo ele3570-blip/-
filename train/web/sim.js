@@ -50,6 +50,17 @@ const CFG = {
   repStart: 1.0, repMin: 0.6, repMax: 1.4, repSpeed: 0.35,
   psoMinSat: 60, psoRatio: 0.5,    // 공익서비스 보상: 적자라도 만족도가 높으면 적자의 50%
   dayStartMin: 5 * 60, dayEndMin: 24 * 60,
+  // 은행 대출. 한도 = (기본 + 자산 × 비율) × 등급 배율, 이자는 하루 결산 때 남은 빚 × 하루 이자율
+  loan: {
+    base: 30_000_000, assetRatio: 0.5, step: 10_000_000,
+    grades: {
+      A: { rate: 0.002, limitMul: 1.2, desc: '최근 7일 흑자, 만족도 70% 이상' },
+      B: { rate: 0.003, limitMul: 1.0, desc: '최근 7일 흑자' },
+      C: { rate: 0.0045, limitMul: 0.8, desc: '기록이 없거나 적자지만 만족도 50% 이상' },
+      D: { rate: 0.007, limitMul: 0, desc: '적자에 만족도 50% 미만, 또는 자금이 마이너스' },
+    },
+    graceDays: 3, // 자금이 마이너스인 채로 이만큼 하루를 마치면 강제 매각
+  },
   // 지역을 연 뒤에도 쓰려는 선로 구간과 역을 따로 사야 함
   unlockCost: { gyeongbuk_e: 8_000_000, gyeongbuk_n: 5_000_000, busan: 15_000_000, gyeongnam: 8_000_000,
                 chungcheong: 40_000_000, chungbuk: 20_000_000, capital: 120_000_000, gangwon: 30_000_000,
@@ -124,8 +135,9 @@ const G = {
   routes: [], trains: [], depot: [], nextRouteNo: 1, nextTrainId: 1,
   waiting: new Map(),    // stationId → [passenger]
   today: null, rep: CFG.repStart, history: [],
+  debt: 0, negDays: 0, over: false, // 빚, 자금이 마이너스로 끝난 날 수, 파산
 };
-function newToday() { return { pax: 0, transfers: 0, revenue: 0, cost: 0, potential: 0, spawned: 0, satSum: 0, satN: 0, gaveUp: 0, leftBehind: 0, trainKm: 0, bought: 0 }; }
+function newToday() { return { interest: 0, pax: 0, transfers: 0, revenue: 0, cost: 0, potential: 0, spawned: 0, satSum: 0, satN: 0, gaveUp: 0, leftBehind: 0, trainKm: 0, bought: 0 }; }
 G.today = newToday();
 
 const isOpen = s => G.unlocked.has(s.region);
@@ -507,13 +519,34 @@ function closeDay() {
   let pso = 0;
   if (profit < 0 && sat != null && sat >= CFG.psoMinSat) pso = Math.round(-profit * CFG.psoRatio);
   G.money += pso;
+  // 대출 이자
+  const grade = creditGrade();
+  const interest = Math.round(G.debt * CFG.loan.grades[grade].rate);
+  G.money -= interest; T.interest = interest;
+  // 자금이 마이너스면 경고 → 강제 매각 → 파산
+  const sold = [];
+  if (G.money < 0) {
+    G.negDays++;
+    if (G.negDays >= CFG.loan.graceDays) {
+      const pool = [...G.depot, ...G.trains].sort((a, b) => trainValue(b) - trainValue(a));
+      for (const t of pool) {
+        if (G.money >= 0) break;
+        if (G.trains.includes(t)) recall(t);
+        const dep = G.depot.find(x => x.id === t.id);
+        sold.push({ label: `${CFG.kinds[dep.kind].icon} ${dep.id}호 ${CFG.kinds[dep.kind].levels[dep.lvl].name}`, value: sellValue(dep) });
+        sellTrain(dep);
+      }
+      if (G.money < 0) G.over = true;
+      else G.negDays = 0;
+    }
+  } else G.negDays = 0;
   const repBefore = G.rep;
   if (sat != null) {
     const target = CFG.repMin + (CFG.repMax - CFG.repMin) * (sat / 100);
     G.rep = Math.max(CFG.repMin, Math.min(CFG.repMax, G.rep + (target - G.rep) * CFG.repSpeed));
   }
-  const res = { day: G.day, ...T, sat, profit, pso, cover: T.potential ? T.pax / T.potential * 100 : 0, repBefore, rep: G.rep, money: G.money };
-  G.history.push({ day: G.day, pax: T.pax, revenue: T.revenue, cost: T.cost, pso, sat });
+  const res = { day: G.day, ...T, sat, profit, pso, grade, sold, negDays: G.negDays, over: G.over, debt: G.debt, cover: T.potential ? T.pax / T.potential * 100 : 0, repBefore, rep: G.rep, money: G.money };
+  G.history.push({ day: G.day, pax: T.pax, revenue: T.revenue, cost: T.cost, pso, interest, sat });
   if (G.history.length > 60) G.history.shift();
   return res;
 }
@@ -630,6 +663,43 @@ function buySections(list) {
   return {};
 }
 
+// ───────── 은행 ─────────
+// 자산 = 열차(구입+등급) + 산 역 + 산 선로 구간 (지금 가격)
+function assetValue() {
+  let v = 0;
+  for (const t of [...G.trains, ...G.depot]) v += trainValue(t);
+  for (const id of G.ownedSt) v += stationPrice(stations[id]);
+  for (const id of G.ownedSecs) v += sectionPrice(secById.get(id));
+  return v;
+}
+// 신용등급: 최근 7일 손익(이자 포함)과 만족도
+function creditGrade() {
+  if (G.money < 0 || G.negDays > 0) return 'D';
+  const h = G.history.slice(-7);
+  if (!h.length) return 'C';
+  const profit = h.reduce((a, x) => a + x.revenue - x.cost + (x.pso || 0) - (x.interest || 0), 0);
+  const sats = h.filter(x => x.sat != null), sat = sats.length ? sats.reduce((a, x) => a + x.sat, 0) / sats.length : 0;
+  if (profit > 0) return sat >= 70 ? 'A' : 'B';
+  return sat >= 50 ? 'C' : 'D';
+}
+function loanLimit() {
+  const L = CFG.loan;
+  return Math.floor((L.base + assetValue() * L.assetRatio) * L.grades[creditGrade()].limitMul / 1_000_000) * 1_000_000;
+}
+const canBorrow = () => Math.max(0, loanLimit() - G.debt);
+function borrow(amount) {
+  amount = Math.min(amount, canBorrow());
+  if (amount <= 0) return { err: creditGrade() === 'D' ? '신용등급 D: 지금은 빌릴 수 없습니다' : '대출 한도를 다 썼습니다' };
+  G.debt += amount; G.money += amount;
+  return { amount };
+}
+function repay(amount) {
+  amount = Math.min(amount, G.debt, Math.max(0, G.money));
+  if (amount <= 0) return { err: G.debt ? '갚을 돈이 없습니다' : '갚을 빚이 없습니다' };
+  G.debt -= amount; G.money -= amount;
+  return { amount };
+}
+
 // 지역 개방
 function unlockRegion(id) {
   const c = CFG.unlockCost[id];
@@ -675,7 +745,7 @@ function upgradeLine(l, what) {
 const SAVE_KEY = 'korea-rail-save-v3'; // v3: 동대구역 + 무궁화 1대로 시작
 function serialize() {
   return JSON.stringify({
-    money: G.money, day: G.day, rep: G.rep, unlocked: [...G.unlocked], lineUp: G.lineUp, ownedSecs: [...G.ownedSecs], ownedSt: [...G.ownedSt],
+    money: G.money, debt: G.debt, negDays: G.negDays, over: G.over, day: G.day, rep: G.rep, unlocked: [...G.unlocked], lineUp: G.lineUp, ownedSecs: [...G.ownedSecs], ownedSt: [...G.ownedSt],
     nextRouteNo: G.nextRouteNo, nextTrainId: G.nextTrainId, history: G.history,
     routes: G.routes.map(r => ({ no: r.no, kind: r.kind, color: r.color, stops: r.stops, name: r.name })),
     trains: G.trains.map(t => ({ id: t.id, kind: t.kind, lvl: t.lvl, route: t.route.no, i: t.i, dir: t.dir })),
@@ -684,7 +754,7 @@ function serialize() {
 }
 function deserialize(s) {
   const o = JSON.parse(s);
-  Object.assign(G, { money: o.money, day: o.day, rep: o.rep, unlocked: new Set(o.unlocked), lineUp: o.lineUp || {},
+  Object.assign(G, { money: o.money, debt: o.debt || 0, negDays: o.negDays || 0, over: !!o.over, day: o.day, rep: o.rep, unlocked: new Set(o.unlocked), lineUp: o.lineUp || {},
     ownedSecs: new Set(o.ownedSecs || []), ownedSt: new Set(o.ownedSt || []),
     nextRouteNo: o.nextRouteNo, nextTrainId: o.nextTrainId, history: o.history || [], t: CFG.dayStartMin, today: newToday(), waiting: new Map() });
   G.routes = [];
@@ -706,7 +776,7 @@ function setupNewGame() {
   rebuildNetwork();
 }
 
-root.SIM = { CFG, D, G, stations, byName, lines, edges, adj, sections, secById, edgeOwned, stOwned, secOwned, stationPrice, buyStation,
+root.SIM = { CFG, D, G, assetValue, creditGrade, loanLimit, canBorrow, borrow, repay, stations, byName, lines, edges, adj, sections, secById, edgeOwned, stOwned, secOwned, stationPrice, buyStation,
   sectionPrice, buySection, missingSections, buySections, ownedKm, regionName, toKm, distKm, isOpen, lineElec, lineDbl, lineVmax, edgeOpen, edgeCap,
   kindOf, tierOf, needsElec, edgeAllowed, findPath, buildLegs, addRoute, routeTitle, routeKm, routeHasNonElec, routeOpen, routeTrains,
   legMinutes, edgeSpeed, cycleMinutes, headway, rideMinutes, rideKm, rebuildNetwork, planFrom, hourShare, peakAt, tick, satPct, closeDay, startNextDay,

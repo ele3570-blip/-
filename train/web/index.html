@@ -112,12 +112,12 @@
   @media (max-width: 640px) {
     #topbar { gap: 8px; padding: 0 8px; font-size: 12px; overflow-x: auto; scrollbar-width: none; }
     #topbar .spacer { display: none; }
-    #topbar .stat:nth-child(4) { display: none; }
+    #topbar .stat:has(#sat) { display: none; }
     #topbar .stat b { font-size: 13px; }
     #topbar #todayStat, #topbar .stat.wide { display: none; }
     #topbar button { padding: 4px 6px; font-size: 12px; }
     #dock { left: 8px; right: 8px; bottom: 8px; transform: none; padding: 4px; gap: 2px; justify-content: space-between; }
-    #dock button { flex: 1; flex-direction: column; gap: 1px; padding: 6px 2px; font-size: 11px; position: relative; }
+    #dock button { flex: 1; flex-direction: column; gap: 1px; padding: 6px 2px; font-size: 11px; position: relative; white-space: nowrap; }
     #dock .badge { position: absolute; top: -6px; right: 0; min-width: 16px; height: 16px; font-size: 10px; }
     #panel { top: 8px; left: 8px; right: 8px; width: auto; bottom: 70px; }
     #infoCard { left: 8px; right: 8px; width: auto; bottom: 70px; max-height: 45%; }
@@ -126,6 +126,12 @@
     #attr { display: none; }
     #modal .box { min-width: 0; width: calc(100% - 24px); padding: 16px; }
   }
+  .bankgrid { display: grid; grid-template-columns: 1fr auto; gap: 4px 12px; background: #fff; border: 1px solid var(--line); border-radius: 8px; padding: 10px; margin-bottom: 10px; }
+  .bankgrid span:nth-child(even) { text-align: right; font-variant-numeric: tabular-nums; font-weight: 600; }
+  .grade { display: inline-flex; width: 26px; height: 26px; border-radius: 6px; align-items: center; justify-content: center; font-weight: 800; color: #fff; margin-right: 6px; }
+  .grade.A { background: #15803d; } .grade.B { background: #2563eb; } .grade.C { background: #d97706; } .grade.D { background: #dc2626; }
+  .bankbtns { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; margin-bottom: 8px; }
+  .bankbtns button { padding: 7px 4px; }
   .stops span.pass { color: var(--muted); border-style: dashed; }
 </style>
 </head>
@@ -135,6 +141,7 @@
     <span class="stat">📅 <b id="day">1일차</b></span>
     <span class="stat">🕐 <b id="clock">05:00</b></span>
     <span class="stat">💰 <b id="money">0</b></span>
+    <span class="stat" id="debtStat" style="display:none" title="은행 빚 (🏦 은행에서 갚기)">🏦 빚 <b id="debt">0</b></span>
     <span class="stat">😊 만족도 <b id="sat">-</b></span>
     <span class="stat wide" title="만족도에 따라 매일 변하고, 다음 날 수요에 곱해집니다">⭐ 평판 <b id="rep">100%</b></span>
     <span class="stat wide" title="열린 지역 역들의 전체 수요 중 오늘 실제로 태운 비율">🧍 수요 충족 <b id="cover">-</b></span>
@@ -155,11 +162,12 @@
     <div id="attr">선로 © <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a> 기여자 · 경계 © 통계청(southkorea-maps) · 역 좌표 위키데이터 · 승하차 한국철도공사(2025)</div>
 
     <nav id="dock">
-      <button data-panel="routes" title="노선 (1)">🛤️ 노선 <span class="badge" id="bRoutes"></span></button>
-      <button data-panel="depot" title="차량기지 (2)">🚉 차량기지 <span class="badge" id="bDepot"></span></button>
-      <button data-panel="regions" title="지역 개방 (3)">🗺️ 지역 <span class="badge" id="bRegions"></span></button>
-      <button data-panel="tracks" title="선로 개량 (4)">🔧 선로</button>
-      <button data-panel="help" title="도움말 (5)">❓ 도움말</button>
+      <button data-panel="routes" title="노선 (1)">🛤️ <span>노선</span> <span class="badge" id="bRoutes"></span></button>
+      <button data-panel="depot" title="차량기지 (2)">🚉 <span>차량기지</span> <span class="badge" id="bDepot"></span></button>
+      <button data-panel="regions" title="지역 개방 (3)">🗺️ <span>지역</span> <span class="badge" id="bRegions"></span></button>
+      <button data-panel="tracks" title="선로 (4)">🔧 <span>선로</span></button>
+      <button data-panel="bank" title="은행 (5)">🏦 <span>은행</span></button>
+      <button data-panel="help" title="도움말 (6)">❓ <span>도움말</span></button>
     </nav>
 
     <section id="panel" hidden>
@@ -182,6 +190,10 @@
       <div class="pbody" data-p="tracks">
         <p class="pdesc">열린 지역의 선로 구간을 사야 노선이 지나갈 수 있습니다. 개량은 산 구간만 공사합니다. 전철화: 광역열차·KTX·ITX-마음 운행 / 복선화: 시간당 열차 4→16대 / 고속화: 최고속도 +30km/h</p>
         <div id="tracks"></div>
+      </div>
+      <div class="pbody" data-p="bank">
+        <p class="pdesc">빌린 돈은 하루 결산 때마다 이자를 냅니다. 아무 때나 갚을 수 있고 수수료는 없습니다. 자금이 마이너스인 채로 3일을 마치면 은행이 열차를 강제로 팔고, 그래도 모자라면 파산합니다.</p>
+        <div id="bank"></div>
       </div>
       <div class="pbody" data-p="help">
         <div class="legend" id="helpText"></div>
