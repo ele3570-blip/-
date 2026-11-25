@@ -6,7 +6,7 @@ const D = root.GAME_DATA;
 
 // ───────────────────────── 밸런스 설정 ─────────────────────────
 const CFG = {
-  startMoney: 30_000_000,
+  startMoney: 45_000_000,
   startRegion: 'daegu',
   demandScale: 1 / 5,           // 실제 5명 = 게임 승객 1명
   sellRatio: 0.5,
@@ -15,9 +15,9 @@ const CFG = {
   // fare = [최저 요금, km당 요금], upgrade = 아래 등급에서 올리는 비용, elec = 전철화된 선로만
   kinds: {
     general: { name: '일반열차', icon: '🚃', price: 3_000_000, tracks: ['conv'], levels: [
-      { name: '무궁화호',   cap: 72, vmax: 150, stopLoss: 2.5, perKm: 300, perDay: 60_000, fare: [2_600, 66], comfort: 0,  upgrade: 0,         color: '#2563eb' },
-      { name: 'ITX-새마을', cap: 76, vmax: 150, stopLoss: 2.0, perKm: 340, perDay: 70_000, fare: [2_600, 98], comfort: 12, upgrade: 3_000_000, color: '#dc2626' },
-      { name: 'ITX-마음',   cap: 84, vmax: 150, stopLoss: 1.4, perKm: 260, perDay: 65_000, fare: [2_600, 98], comfort: 18, upgrade: 4_000_000, color: '#7c3aed', elec: true },
+      { name: '무궁화호',   cap: 72, vmax: 150, stopLoss: 2.5, perKm: 180, perDay: 30_000, fare: [2_600, 66], comfort: 0,  upgrade: 0,         color: '#2563eb' },
+      { name: 'ITX-새마을', cap: 76, vmax: 150, stopLoss: 2.0, perKm: 210, perDay: 40_000, fare: [2_600, 98], comfort: 12, upgrade: 3_000_000, color: '#dc2626' },
+      { name: 'ITX-마음',   cap: 84, vmax: 150, stopLoss: 1.4, perKm: 160, perDay: 35_000, fare: [2_600, 98], comfort: 18, upgrade: 4_000_000, color: '#7c3aed', elec: true },
     ] },
     metro: { name: '광역열차', icon: '🚈', price: 2_500_000, tracks: ['conv'], elec: true, levels: [
       { name: '광역전철 4량', cap: 120, vmax: 120, stopLoss: 1.0, perKm: 150, perDay: 40_000, fare: [1_500, 40], comfort: 0, upgrade: 0,         color: '#0d9488' },
@@ -68,8 +68,8 @@ const CFG = {
     { name: '대구산업선', where: '서대구–대구국가산단', state: '공사 중' },
     { name: '광주–나주 광역철도', where: '광주–나주', state: '계획' },
   ],
-  starter: { kind: 'metro', name: '대경선', trains: 2, stops: ['구미', '왜관', '서대구', '대구', '동대구', '경산'] },
-  starterDepot: ['general'],
+  // 시작: 동대구역 + 경부선 대구권 구간 + 차량기지에 무궁화호 1대. 노선은 없음
+  starter: { stations: ['동대구'], sections: ['gyeongbu@daegu'], depot: ['general'] },
 };
 const HOUR0 = 5;
 const hourSum = CFG.hourly.reduce((a, b) => a + b, 0);
@@ -672,7 +672,7 @@ function upgradeLine(l, what) {
 }
 
 // ───────────────────────── 저장 ─────────────────────────
-const SAVE_KEY = 'korea-rail-save-v2'; // v2: 역·선로 구간 구입, 환승
+const SAVE_KEY = 'korea-rail-save-v3'; // v3: 동대구역 + 무궁화 1대로 시작
 function serialize() {
   return JSON.stringify({
     money: G.money, day: G.day, rep: G.rep, unlocked: [...G.unlocked], lineUp: G.lineUp, ownedSecs: [...G.ownedSecs], ownedSt: [...G.ownedSt],
@@ -699,13 +699,11 @@ function deserialize(s) {
   rebuildNetwork();
 }
 function setupNewGame() {
-  const st = CFG.starter, ids = st.stops.map(n => byName.get(n).id);
-  // 시작 노선이 지나는 역과 구간은 처음부터 가지고 시작
-  for (const id of ids) buyStation(stations[id], true);
-  for (let k = 0; k + 1 < ids.length; k++) for (const sc of missingSections(findPath(ids[k], ids[k + 1], st.kind, true))) G.ownedSecs.add(sc.id);
-  const r = addRoute(st.kind, ids, st.name);
-  for (let k = 0; k < st.trains; k++) dispatch(buyTrain(st.kind, true).t, r);
-  for (const k of CFG.starterDepot) buyTrain(k, true);
+  const st = CFG.starter;
+  for (const n of st.stations) buyStation(byName.get(n), true);
+  for (const id of st.sections) G.ownedSecs.add(id);
+  for (const k of st.depot) buyTrain(k, true);
+  rebuildNetwork();
 }
 
 root.SIM = { CFG, D, G, stations, byName, lines, edges, adj, sections, secById, edgeOwned, stOwned, secOwned, stationPrice, buyStation,
