@@ -1076,4 +1076,14 @@ if (!loaded) {
   $('startBtn').onclick = () => { hideModal(); G.paused = false; setSpeedUI(); save(); };
 }
 requestAnimationFrame(frame);
+// 안드로이드 앱용: 뒤로 가기 = 열린 창부터 닫기(닫았으면 true), 앱을 내리면 멈추고 저장
+window.__back = () => {
+  if ($('modal').style.display === 'flex') { const no = $('askNo'); if (no) no.click(); return true; }
+  if (drawing) { cancelDrawing(); return true; }
+  if (editing) { cancelEdit(); return true; }
+  if (openPanelName) { openPanel(null); return true; }
+  if (selected) { selected = null; renderInfo(); return true; }
+  return false;
+};
+window.__pauseSave = () => { if ($('modal').style.display !== 'flex') { G.paused = true; setSpeedUI(); } save(); };
 window.__UI = { G, S, cam, sx, sy, fitStations }; // 디버그·자동 점검용
