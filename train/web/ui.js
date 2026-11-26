@@ -475,7 +475,7 @@ function routeHtml(r) {
     <div>오늘 승객 <b>${fmt(r.paxToday || 0)}</b>명 · 수입 ${won(r.revToday || 0)} · 운행비 ${won(r.costToday || 0)} · <span class="${profit >= 0 ? 'pos' : 'neg'}">${won(profit)}</span></div>
     <div>기다리는 승객 ${fmt(waiting)}명${r.leftToday ? ` · <span class="neg">만석으로 못 탄 승객 ${fmt(r.leftToday)}명</span>` : ''}</div>`;
   if (!S.routeOpen(r)) h += `<div class="neg">열리지 않은 지역을 지나 운행할 수 없습니다</div>`;
-  h += `<div class="wsub">열차 ${ts.length}대</div>`;
+  h += `<div class="wsub">열차 ${ts.length}대</div>${upAllHtml(r)}`;
   for (const t of ts) h += `<div class="bus">${trainLabel(t)} · ${t.pax.length}/${S.tierOf(t).cap}명<div class="btns">${upBtn(t)}<button data-recall="${t.id}">회수</button></div></div>`;
   const cand = G.depot.filter(t => t.kind === r.kind);
   h += `<div class="btns" style="display:flex;flex-wrap:wrap;gap:4px;margin-top:6px">
@@ -616,6 +616,25 @@ function renderDepot() {
     return `<div class="bus">${trainLabel(t)} <span class="muted">· ${esc(S.routeTitle(t.route))} · Lv${t.lvl + 1} · ${tier.cap}명 · ${tier.vmax}km/h</span>
       <div class="btns">${upBtn(t)}<button data-recall="${t.id}">회수</button></div></div>`;
   }).join('');
+}
+// 노선 열차 한꺼번에 등급 올리기: 목표 등급마다 버튼(몇 대 · 합계 비용). 레벨·전철화로 막히면 이유
+function upAllCost(r, L) {
+  const lv = CFG.kinds[r.kind].levels;
+  let n = 0, c = 0;
+  for (const t of S.routeTrains(r)) if (t.lvl < L) { n++; for (let k = t.lvl + 1; k <= L; k++) c += lv[k].upgrade; }
+  return { n, c };
+}
+function upAllHtml(r) {
+  const ts = S.routeTrains(r); if (!ts.length) return '';
+  const K = CFG.kinds[r.kind], minLv = Math.min(...ts.map(t => t.lvl)), out = [];
+  for (let L = minLv + 1; L < K.levels.length; L++) {
+    const { n, c } = upAllCost(r, L); if (!n) continue;
+    const need = S.needTrain(r.kind, L), name = K.levels[L].name;
+    if (lvLocked(need)) { out.push(`<button disabled>${lockTag(need)} 모두 ${name}</button>`); break; }
+    if (S.needsElec(r.kind, L) && S.routeHasNonElec(r)) { out.push(`<button disabled title="노선에 비전철 구간이 있습니다">모두 ${name} (전철화 필요)</button>`); break; }
+    out.push(`<button data-upall="${r.no}:${L}" ${G.money < c ? 'disabled' : ''}>⬆ 모두 ${name} <span class="muted">${n}대 · ${won(c)}</span></button>`);
+  }
+  return out.length ? `<div class="btns" style="display:flex;flex-wrap:wrap;gap:4px;margin:2px 0 6px">${out.join('')}</div>` : '';
 }
 // 등급 올리기 버튼(차량기지·운행 중·열차 카드 공용)
 function upBtn(t) {
@@ -1118,6 +1137,13 @@ document.addEventListener('click', e => {
   else if (d.selroute) { selected = { type: 'route', r: findR(d.selroute) }; renderInfo(); }
   else if (d.unlock) { const id = d.unlock; if (check(S.unlockRegion(id), `${S.regionName[id]}을(를) 열었습니다`)) fitStations(stations.filter(s => s.region === id || G.unlocked.has(s.region))); }
   else if (d.region && !e.target.closest('button')) fitStations(stations.filter(s => s.region === d.region));
+  else if (d.upall) {
+    const [no, L] = d.upall.split(':').map(Number), r = findR(no);
+    let n = 0, err = null;
+    for (const t of S.routeTrains(r)) while (t.lvl < L) { const res = S.upgradeTrain(t); if (res.err) { err = res.err; break; } n++; }
+    if (err) toast(err); else toast(`${S.routeTitle(r)}: ${CFG.kinds[r.kind].levels[L].name}(으)로 올렸습니다`, '#15803d');
+    refreshAll();
+  }
   else if (d.setn) {
     const [no, want] = d.setn.split(':').map(Number), r = findR(no);
     let ts = S.routeTrains(r), added = 0, bought = 0;
