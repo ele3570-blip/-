@@ -55,7 +55,7 @@ function check(res, okMsg) { if (res && res.err) { toast(res.err); return false;
 const kindIcon = k => CFG.kinds[k].icon;
 // 조사: 받침 있으면 a, 없으면 b (예: josa('경북선', '이', '가') → '경북선이')
 const josa = (w, a, b) => { const c = String(w).charCodeAt(String(w).length - 1) - 0xAC00; return w + (c >= 0 && c < 11172 && c % 28 ? a : b); };
-const trainLabel = t => `${kindIcon(t.kind)} ${t.id}호 ${S.tierOf(t).name}`;
+const trainLabel = t => `${kindIcon(t.kind)} ${t.no}호 ${S.tierOf(t).name}`;
 const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
 
 // ───────────────────────── 화면 좌표 ─────────────────────────

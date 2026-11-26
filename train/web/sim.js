@@ -580,7 +580,7 @@ function closeDay() {
         if (G.money >= 0) break;
         if (G.trains.includes(t)) recall(t);
         const dep = G.depot.find(x => x.id === t.id);
-        sold.push({ label: `${CFG.kinds[dep.kind].icon} ${dep.id}호 ${CFG.kinds[dep.kind].levels[dep.lvl].name}`, value: sellValue(dep) });
+        sold.push({ label: `${CFG.kinds[dep.kind].icon} ${dep.no}호 ${CFG.kinds[dep.kind].levels[dep.lvl].name}`, value: sellValue(dep) });
         sellTrain(dep);
       }
       if (G.money < 0) G.over = true;
@@ -683,11 +683,21 @@ function routeDiag(r) {
 // ───────────────────────── 조작 ─────────────────────────
 function trainValue(t) { const K = CFG.kinds[t.kind]; let v = K.price; for (let k = 1; k <= t.lvl; k++) v += K.levels[k].upgrade; return v; }
 const sellValue = t => Math.round(trainValue(t) * CFG.sellRatio);
+// 차량 번호(호차): 열차 종류별로 1호부터. 판 번호는 비워 두었다가 다음에 산 열차가 씀(가장 작은 빈 번호)
+function freeNo(kind) {
+  const used = new Set([...G.trains, ...G.depot].filter(t => t.kind === kind).map(t => t.no));
+  let n = 1; while (used.has(n)) n++; return n;
+}
+// 예전 저장처럼 번호가 없는 열차에 종류별로 번호 매기기(구입 순서대로)
+function numberTrains() {
+  const all = [...G.trains, ...G.depot].sort((a, b) => a.id - b.id);
+  for (const t of all) if (!t.no) t.no = freeNo(t.kind);
+}
 function buyTrain(kind, free = false) {
   const K = CFG.kinds[kind];
   if (!free) { const e = lvErr(needTrain(kind, 0)); if (e) return { err: `${K.levels[0].name}: ${e}` }; }
   if (!free) { if (G.money < K.price) return { err: '돈이 부족합니다' }; G.money -= K.price; G.today.bought += K.price; }
-  const t = { id: G.nextTrainId++, kind, lvl: 0 };
+  const t = { id: G.nextTrainId++, kind, lvl: 0, no: freeNo(kind) };
   G.depot.push(t);
   return { t };
 }
@@ -729,7 +739,7 @@ function dispatch(t, r) {
 }
 function recall(t) {
   G.trains = G.trains.filter(x => x !== t);
-  const keep = { id: t.id, kind: t.kind, lvl: t.lvl };
+  const keep = { id: t.id, kind: t.kind, lvl: t.lvl, no: t.no };
   G.depot.push(keep);
   rebuildNetwork();
   return keep;
@@ -887,8 +897,8 @@ function serialize() {
     nextRouteNo: G.nextRouteNo, nextTrainId: G.nextTrainId, history: G.history,
     mon: G.mon,
     routes: G.routes.map(r => ({ no: r.no, kind: r.kind, color: r.color, stops: r.stops, name: r.name, mon: r.mon })),
-    trains: G.trains.map(t => ({ id: t.id, kind: t.kind, lvl: t.lvl, route: t.route.no, i: t.i, dir: t.dir })),
-    depot: G.depot.map(t => ({ id: t.id, kind: t.kind, lvl: t.lvl })),
+    trains: G.trains.map(t => ({ id: t.id, no: t.no, kind: t.kind, lvl: t.lvl, route: t.route.no, i: t.i, dir: t.dir })),
+    depot: G.depot.map(t => ({ id: t.id, no: t.no, kind: t.kind, lvl: t.lvl })),
   });
 }
 function deserialize(s) {
@@ -904,10 +914,11 @@ function deserialize(s) {
   G.trains = [];
   for (const t of o.trains) {
     const r = G.routes.find(x => x.no === t.route);
-    if (r) G.trains.push({ id: t.id, kind: t.kind, lvl: t.lvl, route: r, i: Math.min(t.i, r.stops.length - 1), dir: t.dir, legT: 0, legDur: null, dwell: 0.5, pax: [] });
-    else G.depot.push({ id: t.id, kind: t.kind, lvl: t.lvl });
+    if (r) G.trains.push({ id: t.id, no: t.no, kind: t.kind, lvl: t.lvl, route: r, i: Math.min(t.i, r.stops.length - 1), dir: t.dir, legT: 0, legDur: null, dwell: 0.5, pax: [] });
+    else G.depot.push({ id: t.id, no: t.no, kind: t.kind, lvl: t.lvl });
   }
-  G.depot = o.depot.concat(G.depot.filter(x => !o.depot.some(y => y.id === x.id)));
+  G.depot = o.depot.map(t => ({ ...t })).concat(G.depot.filter(x => !o.depot.some(y => y.id === x.id)));
+  numberTrains(); // 예전 저장: 번호 없는 열차에 종류별 번호
   rebuildNetwork();
 }
 // 게임을 처음 상태로(새 게임·불러오기 전에)
