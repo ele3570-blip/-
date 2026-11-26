@@ -12,31 +12,32 @@ const CFG = {
   sellRatio: 0.5,
   // 열차 종류 × 등급. cap = 정원(게임 승객), vmax = 최고속도(km/h)
   // stopLoss = 정차 1번에 가감속으로 잃는 시간(분), perKm = 운행 1km 비용, perDay = 운행 중일 때 하루 고정비
+  // cars·seats = 실제 편성(량)·정원(대략, 산천·이음·청룡은 중련). 게임 수요가 실제의 1/5이라 cap(게임 정원) = seats ÷ 5
   // fare = [최저 요금, km당 요금], upgrade = 아래 등급에서 올리는 비용, elec = 전철화된 선로만
   kinds: {
     // 완행: 모든 역에 서는 옛 보통열차 계열. 싸고 느림. 비전철 선로 OK
     local: { name: '완행열차', icon: '🚂', price: 1_500_000, tracks: ['conv'], levels: [
-      { name: '비둘기호', cap: 64, vmax: 110, stopLoss: 1.8, perKm: 80,  perDay: 12_000, fare: [1_500, 50], comfort: 0,  upgrade: 0,         color: '#64748b' },
-      { name: '통일호',   cap: 72, vmax: 130, stopLoss: 2.0, perKm: 120, perDay: 20_000, fare: [2_000, 58], comfort: 5,  upgrade: 1_500_000, color: '#b45309' },
-      { name: '무궁화호', cap: 80, vmax: 150, stopLoss: 2.5, perKm: 180, perDay: 30_000, fare: [2_600, 66], comfort: 10, upgrade: 2_500_000, color: '#2563eb' },
+      { name: '비둘기호', cars: 5, seats: 400, cap: 80, vmax: 110, stopLoss: 1.8, perKm: 80,  perDay: 12_000, fare: [1_500, 50], comfort: 0,  upgrade: 0,         color: '#64748b' },
+      { name: '통일호',   cars: 6, seats: 430, cap: 86, vmax: 130, stopLoss: 2.0, perKm: 120, perDay: 20_000, fare: [2_000, 58], comfort: 5,  upgrade: 1_500_000, color: '#b45309' },
+      { name: '무궁화호', cars: 7, seats: 500, cap: 100, vmax: 150, stopLoss: 2.5, perKm: 180, perDay: 30_000, fare: [2_600, 66], comfort: 10, upgrade: 2_500_000, color: '#2563eb' },
     ] },
     // 일반(특급): 새마을호(객차·비전철 OK) → 누리로부터는 전동차라 전철화 선로만
     general: { name: '일반열차', icon: '🚆', price: 6_000_000, tracks: ['conv'], levels: [
-      { name: '새마을호',   cap: 72, vmax: 150, stopLoss: 2.2, perKm: 260, perDay: 45_000, fare: [3_200, 98], comfort: 15, upgrade: 0,         color: '#16a34a' },
-      { name: '누리로',     cap: 80, vmax: 160, stopLoss: 1.6, perKm: 220, perDay: 42_000, fare: [3_200, 98], comfort: 16, upgrade: 3_000_000, color: '#ea580c', elec: true },
-      { name: 'ITX-새마을', cap: 90, vmax: 180, stopLoss: 1.5, perKm: 200, perDay: 40_000, fare: [3_200, 98], comfort: 20, upgrade: 3_500_000, color: '#dc2626', elec: true },
-      { name: 'ITX-마음',   cap: 100, vmax: 200, stopLoss: 1.4, perKm: 160, perDay: 35_000, fare: [3_200, 98], comfort: 25, upgrade: 4_000_000, color: '#7c3aed', elec: true },
+      { name: '새마을호',   cars: 6, seats: 330, cap: 66, vmax: 150, stopLoss: 2.2, perKm: 260, perDay: 45_000, fare: [3_200, 98], comfort: 15, upgrade: 0,         color: '#16a34a' },
+      { name: '누리로',     cars: 4, seats: 264, cap: 53, vmax: 160, stopLoss: 1.6, perKm: 220, perDay: 42_000, fare: [3_200, 98], comfort: 16, upgrade: 3_000_000, color: '#ea580c', elec: true },
+      { name: 'ITX-새마을', cars: 6, seats: 376, cap: 75, vmax: 180, stopLoss: 1.5, perKm: 200, perDay: 40_000, fare: [3_200, 98], comfort: 20, upgrade: 3_500_000, color: '#dc2626', elec: true },
+      { name: 'ITX-마음',   cars: 6, seats: 350, cap: 70, vmax: 200, stopLoss: 1.4, perKm: 160, perDay: 35_000, fare: [3_200, 98], comfort: 25, upgrade: 4_000_000, color: '#7c3aed', elec: true },
     ] },
     metro: { name: '광역열차', icon: '🚈', price: 2_500_000, tracks: ['conv'], elec: true, levels: [
-      { name: '광역전철 4량', cap: 120, vmax: 110, stopLoss: 1.0, perKm: 150, perDay: 40_000, fare: [1_500, 40], comfort: 0, upgrade: 0,         color: '#0d9488' },
-      { name: '광역전철 6량', cap: 180, vmax: 130, stopLoss: 1.0, perKm: 210, perDay: 50_000, fare: [1_500, 40], comfort: 3, upgrade: 2_000_000, color: '#0891b2' },
-      { name: '광역전철 8량', cap: 250, vmax: 150, stopLoss: 1.0, perKm: 270, perDay: 60_000, fare: [1_500, 40], comfort: 5, upgrade: 2_500_000, color: '#0369a1' },
+      { name: '광역전철 4량', cars: 4, seats: 640, cap: 128, vmax: 110, stopLoss: 1.0, perKm: 150, perDay: 40_000, fare: [1_500, 40], comfort: 0, upgrade: 0,         color: '#0d9488' },
+      { name: '광역전철 6량', cars: 6, seats: 960, cap: 192, vmax: 130, stopLoss: 1.0, perKm: 210, perDay: 50_000, fare: [1_500, 40], comfort: 3, upgrade: 2_000_000, color: '#0891b2' },
+      { name: '광역전철 8량', cars: 8, seats: 1280, cap: 256, vmax: 150, stopLoss: 1.0, perKm: 270, perDay: 60_000, fare: [1_500, 40], comfort: 5, upgrade: 2_500_000, color: '#0369a1' },
     ] },
     ktx: { name: '고속열차', icon: '🚄', price: 40_000_000, tracks: ['hs', 'conv'], elec: true, levels: [
-      { name: 'KTX',      cap: 72,  vmax: 280, stopLoss: 3.8, perKm: 1_800, perDay: 700_000, fare: [8_400, 145], comfort: 20, upgrade: 0,          color: '#334155' },
-      { name: 'KTX-산천', cap: 82,  vmax: 300, stopLoss: 3.3, perKm: 1_650, perDay: 650_000, fare: [8_400, 150], comfort: 27, upgrade: 15_000_000, color: '#1e3a8a' },
-      { name: 'KTX-이음', cap: 92,  vmax: 310, stopLoss: 2.2, perKm: 1_400, perDay: 560_000, fare: [8_400, 150], comfort: 32, upgrade: 20_000_000, color: '#0f766e' },
-      { name: 'KTX-청룡', cap: 110, vmax: 330, stopLoss: 2.0, perKm: 1_700, perDay: 650_000, fare: [8_400, 155], comfort: 38, upgrade: 30_000_000, color: '#be185d' },
+      { name: 'KTX',      cars: 20, seats: 935, cap: 187,  vmax: 280, stopLoss: 3.8, perKm: 1_800, perDay: 700_000, fare: [8_400, 145], comfort: 20, upgrade: 0,          color: '#334155' },
+      { name: 'KTX-산천', cars: 20, seats: 730, cap: 146,  vmax: 300, stopLoss: 3.3, perKm: 1_650, perDay: 650_000, fare: [8_400, 150], comfort: 27, upgrade: 15_000_000, color: '#1e3a8a' },
+      { name: 'KTX-이음', cars: 12, seats: 760, cap: 152,  vmax: 310, stopLoss: 2.2, perKm: 1_400, perDay: 560_000, fare: [8_400, 150], comfort: 32, upgrade: 20_000_000, color: '#0f766e' },
+      { name: 'KTX-청룡', cars: 16, seats: 1030, cap: 206, vmax: 330, stopLoss: 2.0, perKm: 1_700, perDay: 650_000, fare: [8_400, 155], comfort: 38, upgrade: 30_000_000, color: '#be185d' },
     ] },
   },
   hsTrackFeePerKm: 300,         // 고속선 선로 사용료(열차 1km당)

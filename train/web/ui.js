@@ -735,15 +735,15 @@ function openTierTable() {
   const body = Object.entries(CFG.kinds).map(([k, K]) => `
     <div style="margin:10px 0 4px"><b>${K.icon} ${K.name}</b> <span class="muted" style="font-size:12px">새로 사면 ${won(K.price)} · ${K.tracks.includes('hs') ? '고속선·전철화 일반선' : K.elec ? '전철화 선로만' : '일반선'}</span></div>
     <div style="overflow-x:auto"><table class="tiers" style="width:100%;font-size:12px;border-collapse:collapse;white-space:nowrap">
-      <tr class="muted"><th>등급</th><th>레벨</th><th>올리는 값</th><th>최고속도</th><th>정원</th><th>정차 손실</th><th>운행비/km</th><th>하루 고정비</th><th>100km 운임</th><th>승차감</th></tr>
+      <tr class="muted"><th>등급</th><th>레벨</th><th>올리는 값</th><th>최고속도</th><th>편성</th><th>게임 정원</th><th>정차 손실</th><th>운행비/km</th><th>하루 고정비</th><th>100km 운임</th><th>승차감</th></tr>
       ${K.levels.map((L, i) => { const P = K.levels[i - 1] || null, need = S.needTrain(k, i), lock = lvLocked(need);
         return `<tr style="${lock ? 'opacity:.55' : ''}"><td><span style="display:inline-block;width:8px;height:8px;border-radius:2px;background:${L.color}"></span> <b>${L.name}</b>${L.elec && !K.elec ? ' ⚡' : ''}</td>
           <td>${lock ? '🔒' : ''}Lv${need}</td><td>${i ? won(L.upgrade) : '-'}</td>
-          <td>${L.vmax}km/h${up(L.vmax, P?.vmax)}</td><td>${L.cap}명${up(L.cap, P?.cap)}</td><td>${L.stopLoss}분${up(L.stopLoss, P?.stopLoss, true)}</td>
+          <td>${L.vmax}km/h${up(L.vmax, P?.vmax)}</td><td>${L.cars}량 · 약 ${fmt(L.seats)}명</td><td>${L.cap}명${up(L.cap, P?.cap)}</td><td>${L.stopLoss}분${up(L.stopLoss, P?.stopLoss, true)}</td>
           <td>${fmt(L.perKm)}원</td><td>${won(L.perDay)}</td><td>${fmt(S.fareFor(L, 100))}원</td><td>${L.comfort}</td></tr>`; }).join('')}
     </table></div>`).join('');
   showModal(`<h3 style="margin:0 0 4px">📊 열차 등급표</h3>
-    <div class="muted" style="font-size:12px">등급을 올릴수록 최고속도·정원이 오릅니다. 최고속도는 선로 속도를 넘지 못합니다(일반선 고속화 최대 ${CFG.speedMax}, 고속선 최대 ${CFG.speedMaxHs}km/h). 정차 손실 = 역에 한 번 설 때 잃는 시간. ⚡ = 전철화 선로만</div>
+    <div class="muted" style="font-size:12px">등급을 올릴수록 최고속도·정원이 오릅니다. 최고속도는 선로 속도를 넘지 못합니다(일반선 고속화 최대 ${CFG.speedMax}, 고속선 최대 ${CFG.speedMaxHs}km/h). 정차 손실 = 역에 한 번 설 때 잃는 시간. ⚡ = 전철화 선로만<br>편성·정원은 실제 열차 기준(대략, 광역은 입석 포함, 산천·이음·청룡은 두 편성을 이은 중련). 게임 승객이 실제 하루 승차 인원의 1/5이라 <b>게임 정원 = 실제 정원 ÷ 5</b></div>
     <div style="max-height:62vh;overflow-y:auto">${body}</div>
     <button class="primary" id="askNo" style="width:100%;margin-top:10px">닫기</button>`);
   $('askNo').onclick = hideModal;
@@ -754,12 +754,12 @@ function renderDepot() {
     const rs = G.routes.filter(r => r.kind === k);
     return rs.length ? `<optgroup label="${K.icon} ${K.name}">${rs.map(r => `<option value="${r.no}" ${r.no === depotRouteNo ? 'selected' : ''}>${esc(S.routeTitle(r))}</option>`).join('')}</optgroup>` : '';
   }).join('');
-  $('buyTrain').innerHTML = `<button data-tiers="1" style="grid-column:1/-1">📊 열차 등급표 (속도·정원·비용)</button>` + Object.entries(CFG.kinds).map(([k, K]) => { const need = S.needTrain(k, 0); return `<button data-buy="${k}" ${G.money < K.price || lvLocked(need) ? 'disabled' : ''}>${lvLocked(need) ? lockTag(need) : K.icon} ${K.levels[0].name}<br><b>${won(K.price)}</b><br><span class="muted">${K.levels[0].cap}명 · ${K.levels[0].vmax}km/h</span></button>`; }).join('');
+  $('buyTrain').innerHTML = `<button data-tiers="1" style="grid-column:1/-1">📊 열차 등급표 (속도·정원·비용)</button>` + Object.entries(CFG.kinds).map(([k, K]) => { const need = S.needTrain(k, 0); return `<button data-buy="${k}" ${G.money < K.price || lvLocked(need) ? 'disabled' : ''}>${lvLocked(need) ? lockTag(need) : K.icon} ${K.levels[0].name}<br><b>${won(K.price)}</b><br><span class="muted">${K.levels[0].cars}량 ${K.levels[0].cap}명 · ${K.levels[0].vmax}km/h</span></button>`; }).join('');
   const r = G.routes.find(x => x.no === depotRouteNo);
   const waitCard = t => {
     const L = CFG.kinds[t.kind].levels, nx = L[t.lvl + 1], tier = S.tierOf(t);
     const err = r ? S.canDispatch(t, r) : '노선을 먼저 고르세요';
-    return `<div class="bus"><b>${trainLabel(t)}</b> <span class="muted">Lv${t.lvl + 1} · ${tier.cap}명 · ${tier.vmax}km/h${tier.elec || CFG.kinds[t.kind].elec ? ' · 전철화 선로만' : ''}</span>
+    return `<div class="bus"><b>${trainLabel(t)}</b> <span class="muted">Lv${t.lvl + 1} · ${tier.cars}량 ${tier.cap}명 · ${tier.vmax}km/h${tier.elec || CFG.kinds[t.kind].elec ? ' · 전철화 선로만' : ''}</span>
       <div class="btns">
         <button class="primary" data-dispatch="${t.id}" ${err ? `disabled title="${esc(err)}"` : ''}>배차</button>
         ${nx ? upBtn(t) : ''}
@@ -767,7 +767,7 @@ function renderDepot() {
       </div></div>`;
   };
   const runCard = t => { const tier = S.tierOf(t);
-    return `<div class="bus">${trainLabel(t)} <span class="muted">· ${esc(S.routeTitle(t.route))} · Lv${t.lvl + 1} · ${tier.cap}명 · ${tier.vmax}km/h</span>
+    return `<div class="bus">${trainLabel(t)} <span class="muted">· ${esc(S.routeTitle(t.route))} · Lv${t.lvl + 1} · ${tier.cars}량 ${tier.cap}명 · ${tier.vmax}km/h</span>
       <div class="btns">${upBtn(t)}<button data-recall="${t.id}">회수</button></div></div>`; };
   // 열차 종류별로 묶음: 머리줄(대수) + 종류 전체 등급 올리기 + 대기 열차 + 운행 중 열차
   const html = Object.entries(CFG.kinds).map(([k, K]) => {
