@@ -863,6 +863,19 @@ function whyNoLink(a, b, kind) {
   }
   return `${josa(K.name, '이', '가')} 다닐 수 있는 선로로 두 역이 이어지지 않습니다`;
 }
+// 여러 연결 계획 합치기(겹치는 지역·구간·전철화는 한 번만). b = 새로 넣는 역
+function mergePlans(parts, b) {
+  const regions = [], secs = new Map(), elecLines = new Set();
+  for (const x of parts) {
+    for (const rg of x.regions || []) if (!regions.includes(rg)) regions.push(rg);
+    for (const sc of x.secs || []) secs.set(sc.id, sc);
+    for (const e of x.elec || []) elecLines.add(e.line);
+  }
+  const sl = [...secs.values()], B = stations[b], buySt = !S.stOwned(B);
+  const elec = [...elecLines].map(l => { const km = S.ownedKm(l) + sl.filter(sc => sc.line === l).reduce((a, sc) => a + sc.km, 0); return { line: l, km, cost: Math.round(km * CFG.elecPerKm / 100_000) * 100_000 }; });
+  const cost = regions.reduce((a, rg) => a + CFG.unlockCost[rg], 0) + sl.reduce((a, sc) => a + S.sectionPrice(sc), 0) + (buySt ? S.stationPrice(B) : 0) + elec.reduce((a, e) => a + e.cost, 0);
+  return { regions, secs: sl, buySt, elec, cost };
+}
 async function buyLink(plan, b) {
   const B = stations[b];
   if (!plan.cost) return true;
@@ -931,18 +944,22 @@ async function editClick(s) {
     if (st.length <= 2) return toast('정차역은 2개 이상이어야 합니다');
     st.splice(k, 1);
   } else {
-    if (!await ensureStation(s) || !editing) return;
-    // 가장 덜 돌아가는 자리에 끼워 넣기
-    let best = null;
+    // 끼워 넣을 자리마다 (앞 역 → 이 역, 이 역 → 뒤 역)을 잇는 데 필요한 것을 계산해 가장 싸고 덜 돌아가는 자리를 고름
+    let best = null, lastErr = null;
     for (let i = 0; i <= st.length; i++) {
-      const cand = [...st.slice(0, i), s.id, ...st.slice(i)];
-      const legs = S.buildLegs(editing.kind, cand);
-      if (!legs) continue;
-      const km = legs.reduce((a, l) => a + l.km, 0);
-      if (!best || km < best.km) best = { km, cand };
+      const prev = st[i - 1], next = st[i], parts = [];
+      if (prev != null) parts.push(planLink(prev, s.id, editing.kind));
+      if (next != null) parts.push(planLink(s.id, next, editing.kind));
+      const bad = parts.find(x => x.err); if (bad) { lastErr = bad.err; continue; }
+      const plan = mergePlans(parts, s.id);
+      const km = parts.reduce((a, x) => a + (x.path ? x.path.km : 0), 0);
+      if (!best || plan.cost < best.plan.cost - 1 || (Math.abs(plan.cost - best.plan.cost) <= 1 && km < best.km)) best = { plan, km, i };
     }
-    if (!best) return toast('이 역은 산 선로로 노선과 이어지지 않습니다. 🔧 선로에서 구간을 먼저 사세요');
-    st.splice(0, st.length, ...best.cand);
+    if (!best) return toast(lastErr || '이 역은 노선과 이어지지 않습니다');
+    if (!await buyLink(best.plan, s.id) || !editing) return;
+    const cand = [...st.slice(0, best.i), s.id, ...st.slice(best.i)];
+    if (!S.buildLegs(editing.kind, cand)) return toast('이을 수 없습니다');
+    st.splice(0, st.length, ...cand);
   }
   editing.legs = S.buildLegs(editing.kind, st) || [];
 }
