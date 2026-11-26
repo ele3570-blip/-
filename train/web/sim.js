@@ -362,6 +362,56 @@ function ttBuild(r) {
   return true;
 }
 const isTerminal = t => t.i === 0 || t.i === t.route.stops.length - 1;
+// 이 시간표에 필요한 열차 수(ttBuild 와 같은 방법)
+function ttNeed(r, tt) {
+  const ow = oneWayMin(r, refTier(r)), d0 = depsOf(tt); if (!d0.length) return { need: 0, runs: 0, ow };
+  const h0 = d0.length > 1 ? d0[1] - d0[0] : 60, shift = (ow + CFG.tt.turnMin) % h0;
+  const d1 = d0.map(x => Math.round(x + shift)).filter(x => x <= Math.max(tt.last + shift, tt.last));
+  return { need: planTrains([d0, d1], ow).need, runs: d0.length + d1.length, ow };
+}
+// 승객 많은 시간에 맞춘 시간표 추천: 시간대별 기록(어제 하루, 없으면 오늘 끝난 시간대)으로
+// 시간당 승객·km → 편성이 알맞게 찰 만큼 편수 → 배차 간격(깔끔한 값으로)
+function recommendTT(r) {
+  const cur = ttOf(r), cap = refTier(r).cap, km = routeKm(r), out = { tt: { auto: false, first: cur.first, last: cur.last, hw: {} }, bands: {} };
+  let any = false;
+  for (const b of TT_BANDS) {
+    const from = Math.max(b.from, cur.first), to = Math.min(b.to, cur.last + 1);
+    let x = r.yestB?.[b.id], hrs = (to - from) / 60;
+    if (!x || x.board < 3) { // 오늘 기록: 끝난 시간대거나 지금 시간대(지난 만큼)
+      const y = r.stB?.[b.id];
+      if (y && y.board >= 3 && G.t > from) { x = y; hrs = (Math.min(G.t, to) - from) / 60; } else x = null;
+    }
+    const maxHw = r.kind === 'metro' ? (b.id === 'am' || b.id === 'pm' ? 20 : 60) : (b.id === 'dawn' || b.id === 'night' ? 180 : 120);
+    let hw;
+    if (!x || hrs <= 0.2) hw = maxHw; // 기록 없음 = 승객이 거의 없는 시간
+    else {
+      any = true;
+      const infl = Math.min(3, (x.board + x.gave + x.leftU) / Math.max(1, x.board));
+      const pkh = x.paxKm * infl / hrs;               // 시간당 승객·km(놓친 승객 포함)
+      const runsDir = pkh / (cap * km * 0.4) / 2;    // 방향마다 시간당 필요한 편수(평균 40% 차면 붐비는 구간은 거의 꽉)
+      hw = runsDir > 0 ? 60 / runsDir : maxHw;
+      out.bands[b.id] = { perHour: Math.round((x.board + x.gave + x.leftU) / hrs), from: x === r.yestB?.[b.id] ? '어제' : '오늘' };
+    }
+    out.bands[b.id] = { ...(out.bands[b.id] || {}), raw: Math.max(5, Math.min(maxHw, hw)), maxHw };
+  }
+  if (!any) return null;
+  // 1) 가장 붐비는 시간대를 태울 만큼 열차 수(N)를 정하고, 그 N대로 낼 수 있는 간격을 기본으로
+  //    (열차는 하루 종일 가지고 있으니 한가할 때도 굴리는 편이 손님이 늘어 이익)
+  // 2) 승객이 거의 없어 한 편 운임이 운행비의 30%도 안 되는 시간대만 간격을 넓힘(기록이 없는 시간대는 그대로)
+  const n = routeTrains(r).length, minRaw = Math.min(...TT_BANDS.map(b => out.bands[b.id].raw));
+  let N = Math.max(1, n); while (N < 300 && autoHw(r, N) > minRaw) N++;
+  const base = autoHw(r, N), tier = refTier(r);
+  const yb = r.yest?.board ? r.yest : r.st, yr = r.yest?.board ? (r.yestRev || 0) : (r.revToday || 0);
+  const fare = yr / Math.max(1, yb?.board || 0), runCost = km * (tier.perKm + (r.kind === 'ktx' ? CFG.hsTrackFeePerKm : 0));
+  for (const b of TT_BANDS) {
+    const x = out.bands[b.id];
+    let hw = Math.min(x.raw, base);
+    if (fare > 0 && x.perHour != null) while (hw < x.maxHw && x.perHour / 2 * hw / 60 * fare < runCost * 0.3) hw = NICE_HW.find(h => h > hw) || x.maxHw;
+    out.tt.hw[b.id] = NICE_HW.filter(h => h <= Math.max(5, hw)).pop() || 5;
+  }
+  Object.assign(out, ttNeed(r, out.tt), { peakN: N });
+  return out;
+}
 // 종착역에 선 열차에게 다음 편 주기(그 종착역에서 아직 아무도 안 맡은 가장 이른 편). 없으면 쉼
 function assignNext(t, minGap = 0) {
   const r = t.route, T = r.T; if (!T || !isTerminal(t)) { t.run = null; return false; }
@@ -1243,7 +1293,7 @@ function setupNewGame() {
   rebuildNetwork();
 }
 
-root.SIM = { TT_BANDS, NICE_HW, ttOf, depsOf, planTrains, oneWayMin, autoHw, ttBuild, layoutAll, respaceRoute, spacingRatio, get commuteTable() { return commuteTable; }, CFG, D, G, level, levelOf, levelNeed, needTrain, lvErr, resetGame, routeDiag, upgradeBlock, dateOf, isMonthEnd, monthReport, startMonth, assetValue, creditGrade, loanLimit, canBorrow, borrow, repay, stations, byName, lines, edges, adj, sections, secById, edgeOwned, stOwned, secOwned, stationPrice, buyStation,
+root.SIM = { ttNeed, recommendTT, TT_BANDS, NICE_HW, ttOf, depsOf, planTrains, oneWayMin, autoHw, ttBuild, layoutAll, respaceRoute, spacingRatio, get commuteTable() { return commuteTable; }, CFG, D, G, level, levelOf, levelNeed, needTrain, lvErr, resetGame, routeDiag, upgradeBlock, dateOf, isMonthEnd, monthReport, startMonth, assetValue, creditGrade, loanLimit, canBorrow, borrow, repay, stations, byName, lines, edges, adj, sections, secById, edgeOwned, stOwned, secOwned, stationPrice, buyStation,
   sectionPrice, buySection, missingSections, buySections, ownedKm, regionName, toKm, distKm, isOpen, lineElec, lineDbl, lineVmax, edgeOpen, edgeCap,
   kindOf, tierOf, needsElec, edgeAllowed, findPath, buildLegs, addRoute, routeTitle, routeKm, routeHasNonElec, routeOpen, routeTrains,
   legMinutes, edgeSpeed, cycleMinutes, headway, rideMinutes, rideKm, rebuildNetwork, planFrom, hourShare, peakAt, tick, satPct, closeDay, startNextDay,

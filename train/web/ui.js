@@ -470,33 +470,37 @@ function ttSummaryHtml(r) {
     <div style="font-size:12px;line-height:1.6">첫차 <b>${tmin(tt.first)}</b> · 막차 <b>${tmin(tt.last)}</b> · 하루 ${T.deps[0].length + T.deps[1].length}편 (편도 ${minTxt(T.oneWay)})<br>
       <span class="muted">${bands}</span><br>
       필요 열차 <b>${T.need}대</b> · 지금 ${n}대 ${short ? `<span class="tag warn">${T.need - n}대 부족 → 결행</span>` : ''}${r.cancelToday ? ` · <span class="neg">오늘 결행 ${r.cancelToday}편</span>` : ''}</div>
-    <div class="btns" style="display:flex;flex-wrap:wrap;gap:4px;margin:4px 0 6px"><button data-ttedit="${r.no}">✏️ 시간표 편집</button><button data-ttview="${r.no}">📋 시간표 보기</button>
+    <div class="btns" style="display:flex;flex-wrap:wrap;gap:4px;margin:4px 0 6px"><button data-ttedit="${r.no}">✏️ 시간표 편집</button><button data-ttview="${r.no}">📋 시간표 보기</button>${S.recommendTT(r) ? `<button data-ttrec="${r.no}">👥 승객 맞춤 추천</button>` : ''}
       ${short ? `<button class="primary" data-setn="${r.no}:${T.need}">＋ 필요한 만큼 열차 넣기</button>` : ''}</div>`;
 }
 // 시간표 편집 창: 자동/직접, 첫차·막차, 시간대별 간격. 고치는 대로 필요 열차 수 계산
-function openTTEdit(r) {
-  const tt = JSON.parse(JSON.stringify(S.ttOf(r)));
+function openTTEdit(r, useRec = false) {
+  let tt = JSON.parse(JSON.stringify(S.ttOf(r)));
+  const rec = S.recommendTT(r); let recApplied = false;
+  if (useRec && rec) { tt = JSON.parse(JSON.stringify(rec.tt)); recApplied = true; }
   const times = (a, b, step) => { const o = []; for (let m = a; m <= b; m += step) o.push(m); return o; };
   const sel = (id, opts, v, fmtf) => `<select id="${id}" style="font:inherit;padding:4px;border:1px solid #d1d5db;border-radius:6px">${opts.map(x => `<option value="${x}" ${x === v ? 'selected' : ''}>${fmtf(x)}</option>`).join('')}</select>`;
   const draw = () => {
-    const deps0 = S.depsOf(tt), ow = r.T ? r.T.oneWay : S.oneWayMin(r), h0 = deps0.length > 1 ? deps0[1] - deps0[0] : 60;
-    const shift = (ow + CFG.tt.turnMin) % h0, deps1 = deps0.map(x => Math.round(x + shift));
-    const need = deps0.length ? S.planTrains([deps0, deps1], ow).need : 0, n = S.routeTrains(r).length;
+    const auto = tt.auto ? { ...tt, hw: Object.fromEntries(S.TT_BANDS.map(b => [b.id, S.autoHw(r, Math.max(1, S.routeTrains(r).length))])) } : tt;
+    const { need, runs, ow } = S.ttNeed(r, auto), n = S.routeTrains(r).length;
     showModal(`<h3 style="margin:0 0 6px">🕐 ${esc(S.routeTitle(r))} 시간표</h3>
+      <div style="margin-bottom:8px">${rec ? `<button id="ttRec" ${recApplied ? 'class="primary"' : ''} style="width:100%">👥 승객 많은 시간에 맞춰 추천 ${recApplied ? '(적용됨)' : ''} <span style="font-size:12px;opacity:.8">필요 ${rec.need}대</span></button>
+        <div class="muted" style="font-size:12px;margin-top:3px">${(() => { const pk = S.TT_BANDS.filter(b => rec.bands[b.id]?.perHour).sort((a, b) => rec.bands[b.id].perHour - rec.bands[a.id].perHour)[0]; return pk ? `가장 붐비는 ${pk.name} 시간대(시간당 ${fmt(rec.bands[pk.id].perHour)}명)를 다 태울 간격으로 맞추고, 한가한 시간에도 그 열차들을 계속 돌립니다(자주 다닐수록 손님이 늘어 이익). 승객이 거의 없는 시간대만 간격을 넓힙니다` : ''; })()}</div>` : '<div class="muted" style="font-size:12px">👥 운행 기록이 쌓이면(하루쯤) 승객 많은 시간에 맞춘 시간표를 추천합니다</div>'}</div>
       <label style="display:flex;gap:6px;align-items:center;margin-bottom:8px"><input type="checkbox" id="ttAuto" ${tt.auto ? 'checked' : ''}> 열차 수에 맞춰 자동 (지금 ${n}대 → ${hwTxt(S.autoHw(r, Math.max(1, n)))} 간격)</label>
       <div style="display:grid;grid-template-columns:auto 1fr;gap:6px 10px;align-items:center;opacity:${tt.auto ? .45 : 1}">
         <span>첫차</span>${sel('ttFirst', times(300, 540, 10), tt.first, tmin)}
         <span>막차</span>${sel('ttLast', times(1080, 1430, 10), tt.last, tmin)}
-        ${S.TT_BANDS.map(b => `<span>${b.name} <span class="muted" style="font-size:11px">${tmin(b.from)}~${tmin(b.to)}</span></span>${sel('tt_' + b.id, [0, ...S.NICE_HW], tt.hw[b.id], hwTxt)}`).join('')}
+        ${S.TT_BANDS.map(b => { const x = rec?.bands[b.id]; return `<span>${b.name} <span class="muted" style="font-size:11px">${tmin(b.from)}~${tmin(b.to)}${x ? ` · 시간당 ${fmt(x.perHour)}명` : ''}${rec && !tt.auto && rec.tt.hw[b.id] !== tt.hw[b.id] ? ` · 추천 ${hwTxt(rec.tt.hw[b.id])}` : ''}</span></span>${sel('tt_' + b.id, [0, ...S.NICE_HW], tt.hw[b.id], hwTxt)}`; }).join('')}
       </div>
-      <div class="slot" style="margin-top:10px">하루 <b>${deps0.length * 2}</b>편 · 편도 ${minTxt(ow)} · 필요 열차 <b>${need}대</b> (지금 ${n}대)
+      <div class="slot" style="margin-top:10px">하루 <b>${runs}</b>편 · 편도 ${minTxt(ow)} · 필요 열차 <b>${need}대</b> (지금 ${n}대)
         ${need > n ? `<br><span class="neg">${need - n}대 부족: 열차를 더 넣지 않으면 결행이 생깁니다</span>` : need < n ? `<br><span class="muted">${n - need}대는 쉬게 됩니다(빈 편이 생기면 대신 나감)</span>` : ''}</div>
       <div style="display:flex;gap:8px;margin-top:10px"><button id="askNo" style="flex:1">취소</button><button class="primary" id="ttSave" style="flex:1">저장</button></div>`);
-    $('ttAuto').onchange = e => { tt.auto = e.target.checked; draw(); };
-    ['ttFirst', 'ttLast'].forEach(id => $(id).onchange = e => { tt[id === 'ttFirst' ? 'first' : 'last'] = +e.target.value; tt.auto = false; draw(); });
-    S.TT_BANDS.forEach(b => $('tt_' + b.id).onchange = e => { tt.hw[b.id] = +e.target.value; tt.auto = false; draw(); });
+    $('ttAuto').onchange = e => { tt.auto = e.target.checked; recApplied = false; draw(); };
+    if ($('ttRec')) $('ttRec').onclick = () => { tt = JSON.parse(JSON.stringify(rec.tt)); recApplied = true; draw(); };
+    ['ttFirst', 'ttLast'].forEach(id => $(id).onchange = e => { tt[id === 'ttFirst' ? 'first' : 'last'] = +e.target.value; tt.auto = false; recApplied = false; draw(); });
+    S.TT_BANDS.forEach(b => $('tt_' + b.id).onchange = e => { tt.hw[b.id] = +e.target.value; tt.auto = false; recApplied = false; draw(); });
     $('askNo').onclick = hideModal;
-    $('ttSave').onclick = () => { r.tt = tt; S.rebuildNetwork(); S.respaceRoute(r); hideModal(); toast('시간표를 바꿨습니다', '#15803d'); refreshAll(); };
+    $('ttSave').onclick = () => { r.tt = tt; S.rebuildNetwork(); S.respaceRoute(r); hideModal(); { const nd = r.T?.need || 0, n = S.routeTrains(r).length; toast(nd > n ? `시간표를 바꿨습니다. 열차 ${nd - n}대가 더 필요합니다(노선 카드의 ＋ 버튼)` : '시간표를 바꿨습니다', nd > n ? '#b45309' : '#15803d'); } refreshAll(); };
   };
   draw();
 }
@@ -589,12 +593,12 @@ function routeHtml(r) {
     <div>기다리는 승객 ${fmt(waiting)}명${r.leftToday ? ` · <span class="neg">만석으로 못 탄 승객 ${fmt(r.leftToday)}명</span>` : ''}</div>`;
   if (!S.routeOpen(r)) h += `<div class="neg">열리지 않은 지역을 지나 운행할 수 없습니다</div>`;
   h += ttSummaryHtml(r);
-  h += `<div class="wsub">열차 ${ts.length}대</div>${upAllHtml(r)}`;
-  for (const t of ts) h += `<div class="bus">${trainLabel(t)} · ${t.pax.length}/${S.tierOf(t).cap}명<div class="btns">${upBtn(t)}<button data-recall="${t.id}">회수</button></div></div>`;
+  // 열차 추가 버튼은 등급 올리기 버튼과 같은 줄에
   const cand = G.depot.filter(t => t.kind === r.kind);
-  h += `<div class="btns" style="display:flex;flex-wrap:wrap;gap:4px;margin-top:6px">
-    ${cand.length ? `<button class="primary" data-add="${r.no}">＋ 차량기지에서 배차 (${cand.length}대)</button>` : `<button data-buyadd="${r.no}">＋ ${K.name} 사서 배차 (${won(K.price)})</button>`}
-    <button data-del="${r.no}">🗑 노선 삭제</button></div>`;
+  const addBtn = cand.length ? `<button class="primary" data-add="${r.no}">＋ 열차 추가 <span style="opacity:.8">차량기지 ${cand.length}대</span></button>` : `<button class="primary" data-buyadd="${r.no}" ${G.money < K.price ? 'disabled' : ''}>＋ 열차 추가 <span style="opacity:.8">${K.levels[0].name} 사서 ${won(K.price)}</span></button>`;
+  h += `<div class="wsub">열차 ${ts.length}대</div>${upAllHtml(r, addBtn)}`;
+  for (const t of ts) h += `<div class="bus">${trainLabel(t)} · ${t.pax.length}/${S.tierOf(t).cap}명<div class="btns">${upBtn(t)}<button data-recall="${t.id}">회수</button></div></div>`;
+  h += `<div class="btns" style="display:flex;flex-wrap:wrap;gap:4px;margin-top:6px"><button data-del="${r.no}">🗑 노선 삭제</button></div>`;
   return h;
 }
 function trainHtml(t) {
@@ -789,9 +793,9 @@ function upAllCost(r, L) {
   for (const t of S.routeTrains(r)) if (t.lvl < L) { n++; for (let k = t.lvl + 1; k <= L; k++) c += lv[k].upgrade; }
   return { n, c };
 }
-function upAllHtml(r) {
-  const ts = S.routeTrains(r); if (!ts.length) return '';
-  const K = CFG.kinds[r.kind], minLv = Math.min(...ts.map(t => t.lvl)), out = [];
+function upAllHtml(r, first = '') {
+  const ts = S.routeTrains(r), out = first ? [first] : [];
+  const K = CFG.kinds[r.kind], minLv = ts.length ? Math.min(...ts.map(t => t.lvl)) : K.levels.length;
   for (let L = minLv + 1; L < K.levels.length; L++) {
     const { n, c } = upAllCost(r, L); if (!n) continue;
     const need = S.needTrain(r.kind, L), name = K.levels[L].name;
@@ -1426,6 +1430,7 @@ document.addEventListener('click', e => {
   }
   else if (d.tiers) openTierTable();
   else if (d.ttedit) openTTEdit(findR(d.ttedit));
+  else if (d.ttrec) openTTEdit(findR(d.ttrec), true);
   else if (d.ttview) openTTView(findR(d.ttview));
   else if (d.respace) { const r = findR(d.respace); check(S.respaceRoute(r), `${S.routeTitle(r)}: 열차 ${S.routeTrains(r).length}대를 같은 간격으로 놓았습니다`); }
   else if (d.upall) {
