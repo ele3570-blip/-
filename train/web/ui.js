@@ -428,6 +428,7 @@ function stationHtml(s) {
   if (open && !S.stOwned(s)) h += `<div style="margin-top:6px"><button class="primary" data-buyst="${s.id}" ${G.money < S.stationPrice(s) ? 'disabled' : ''}>🏷 역 사기 ${won(S.stationPrice(s))}</button> <span class="muted">사야 열차를 세울 수 있습니다</span></div>`;
   if (open) {
     h += `<div style="margin-top:6px">🧍 기다리는 승객 <b>${fmt(q.length)}</b>명 · 지나는 노선 ${rs.length}개${T ? ` · 이어진 수요 ${Math.round(T.served * 100)}%` : ''}</div>`;
+    h += boardHtml(s);
     if (q.length) {
       const cnt = new Map(); for (const p of q) cnt.set(p.dest, (cnt.get(p.dest) || 0) + 1);
       const top = [...cnt].sort((a, b) => b[1] - a[1]).slice(0, 6), nx = q.filter(p => p.transfer).length;
@@ -457,6 +458,87 @@ function routeStopsHtml(r) {
   return h + '</div>';
 }
 // 노선이 지나는 선로: 종류별 km 막대와 선로 순서(예: 경부선 전철 45km → 경부고속선 120km)
+// ───────── 시간표 ─────────
+const tmin = m => `${String(Math.floor(m / 60) % 24).padStart(2, '0')}:${String(Math.round(m % 60)).padStart(2, '0')}`;
+const hwTxt = h => !h ? '운행 안 함' : h >= 60 ? `${h / 60 === Math.floor(h / 60) ? h / 60 + '시간' : Math.floor(h / 60) + '시간 ' + (h % 60) + '분'}` : `${h}분`;
+function ttSummaryHtml(r) {
+  const tt = S.ttOf(r), T = r.T, n = S.routeTrains(r).length;
+  if (!T || !n) return `<div class="wsub">🕐 시간표</div><div class="muted" style="font-size:12px">열차를 배차하면 시간표가 생깁니다 <button data-ttedit="${r.no}" style="padding:2px 8px;font-size:12px">시간표 편집</button></div>`;
+  const bands = S.TT_BANDS.map(b => `${b.name} ${hwTxt(tt.hw[b.id])}`).join(' · ');
+  const short = !tt.auto && n < T.need;
+  return `<div class="wsub">🕐 시간표 ${tt.auto ? '<span class="tag gray">자동</span>' : '<span class="tag">직접</span>'}</div>
+    <div style="font-size:12px;line-height:1.6">첫차 <b>${tmin(tt.first)}</b> · 막차 <b>${tmin(tt.last)}</b> · 하루 ${T.deps[0].length + T.deps[1].length}편 (편도 ${minTxt(T.oneWay)})<br>
+      <span class="muted">${bands}</span><br>
+      필요 열차 <b>${T.need}대</b> · 지금 ${n}대 ${short ? `<span class="tag warn">${T.need - n}대 부족 → 결행</span>` : ''}${r.cancelToday ? ` · <span class="neg">오늘 결행 ${r.cancelToday}편</span>` : ''}</div>
+    <div class="btns" style="display:flex;flex-wrap:wrap;gap:4px;margin:4px 0 6px"><button data-ttedit="${r.no}">✏️ 시간표 편집</button><button data-ttview="${r.no}">📋 시간표 보기</button>
+      ${short ? `<button class="primary" data-setn="${r.no}:${T.need}">＋ 필요한 만큼 열차 넣기</button>` : ''}</div>`;
+}
+// 시간표 편집 창: 자동/직접, 첫차·막차, 시간대별 간격. 고치는 대로 필요 열차 수 계산
+function openTTEdit(r) {
+  const tt = JSON.parse(JSON.stringify(S.ttOf(r)));
+  const times = (a, b, step) => { const o = []; for (let m = a; m <= b; m += step) o.push(m); return o; };
+  const sel = (id, opts, v, fmtf) => `<select id="${id}" style="font:inherit;padding:4px;border:1px solid #d1d5db;border-radius:6px">${opts.map(x => `<option value="${x}" ${x === v ? 'selected' : ''}>${fmtf(x)}</option>`).join('')}</select>`;
+  const draw = () => {
+    const deps0 = S.depsOf(tt), ow = r.T ? r.T.oneWay : S.oneWayMin(r), h0 = deps0.length > 1 ? deps0[1] - deps0[0] : 60;
+    const shift = (ow + CFG.tt.turnMin) % h0, deps1 = deps0.map(x => Math.round(x + shift));
+    const need = deps0.length ? S.planTrains([deps0, deps1], ow).need : 0, n = S.routeTrains(r).length;
+    showModal(`<h3 style="margin:0 0 6px">🕐 ${esc(S.routeTitle(r))} 시간표</h3>
+      <label style="display:flex;gap:6px;align-items:center;margin-bottom:8px"><input type="checkbox" id="ttAuto" ${tt.auto ? 'checked' : ''}> 열차 수에 맞춰 자동 (지금 ${n}대 → ${hwTxt(S.autoHw(r, Math.max(1, n)))} 간격)</label>
+      <div style="display:grid;grid-template-columns:auto 1fr;gap:6px 10px;align-items:center;opacity:${tt.auto ? .45 : 1}">
+        <span>첫차</span>${sel('ttFirst', times(300, 540, 10), tt.first, tmin)}
+        <span>막차</span>${sel('ttLast', times(1080, 1430, 10), tt.last, tmin)}
+        ${S.TT_BANDS.map(b => `<span>${b.name} <span class="muted" style="font-size:11px">${tmin(b.from)}~${tmin(b.to)}</span></span>${sel('tt_' + b.id, [0, ...S.NICE_HW], tt.hw[b.id], hwTxt)}`).join('')}
+      </div>
+      <div class="slot" style="margin-top:10px">하루 <b>${deps0.length * 2}</b>편 · 편도 ${minTxt(ow)} · 필요 열차 <b>${need}대</b> (지금 ${n}대)
+        ${need > n ? `<br><span class="neg">${need - n}대 부족: 열차를 더 넣지 않으면 결행이 생깁니다</span>` : need < n ? `<br><span class="muted">${n - need}대는 쉬게 됩니다(빈 편이 생기면 대신 나감)</span>` : ''}</div>
+      <div style="display:flex;gap:8px;margin-top:10px"><button id="askNo" style="flex:1">취소</button><button class="primary" id="ttSave" style="flex:1">저장</button></div>`);
+    $('ttAuto').onchange = e => { tt.auto = e.target.checked; draw(); };
+    ['ttFirst', 'ttLast'].forEach(id => $(id).onchange = e => { tt[id === 'ttFirst' ? 'first' : 'last'] = +e.target.value; tt.auto = false; draw(); });
+    S.TT_BANDS.forEach(b => $('tt_' + b.id).onchange = e => { tt.hw[b.id] = +e.target.value; tt.auto = false; draw(); });
+    $('askNo').onclick = hideModal;
+    $('ttSave').onclick = () => { r.tt = tt; S.rebuildNetwork(); S.respaceRoute(r); hideModal(); toast('시간표를 바꿨습니다', '#15803d'); refreshAll(); };
+  };
+  draw();
+}
+// 시간표 보기: 방향마다 출발·도착 시각, 결행·지난 편 표시
+function openTTView(r) {
+  const T = r.T; if (!T) return toast('열차를 배차하면 시간표가 생깁니다');
+  const L = r.stops.length - 1, A = stations[r.stops[0]].name, B = stations[r.stops[L]].name;
+  const col = d => T.deps[d].map((t0, idx) => {
+    const st = T.past[d].has(idx) || (t0 + T.off[d][d === 0 ? L : 0] < G.t) ? 'past' : T.cancel[d].has(idx) ? 'cancel' : T.taken[d].has(idx) ? 'run' : 'wait';
+    const arr = t0 + T.off[d][d === 0 ? L : 0] - CFG.dwellBase;
+    const Ld = T.load[d][idx], booked = Ld ? Math.max(...Ld) : 0, cap = S.tierOf(S.routeTrains(r)[0] || { kind: r.kind, lvl: 0 }).cap;
+    return `<tr style="opacity:${st === 'past' ? .45 : 1}"><td>${tmin(t0)}</td><td>→ ${tmin(arr)}</td><td style="text-align:right">${st === 'cancel' ? '<span class="neg">결행</span>' : booked >= cap ? '<span class="neg">매진</span>' : booked ? `예매 ${booked}/${cap}` : ''}</td></tr>`;
+  }).join('');
+  showModal(`<h3 style="margin:0 0 6px">📋 ${esc(S.routeTitle(r))} 시간표</h3>
+    <div style="max-height:60vh;overflow-y:auto;display:grid;grid-template-columns:1fr 1fr;gap:10px">
+      <div><b>${esc(A)} → ${esc(B)}</b><table style="font-size:13px;width:100%;white-space:nowrap">${col(0)}</table></div>
+      <div><b>${esc(B)} → ${esc(A)}</b><table style="font-size:13px;width:100%;white-space:nowrap">${col(1)}</table></div>
+    </div><button class="primary" id="askNo" style="width:100%;margin-top:10px">닫기</button>`);
+  $('askNo').onclick = hideModal;
+}
+// 역 출발 안내판: 이 역에서 다음에 떠나는 열차들
+function boardHtml(s) {
+  const rows = [];
+  for (const r of S.servedBy.get(s.id) || []) {
+    const T = r.T; if (!T) continue; const i = r.idxOf.get(s.id), L = r.stops.length - 1;
+    for (let d = 0; d < 2; d++) {
+      if ((d === 0 && i === L) || (d === 1 && i === 0)) continue;
+      const to = stations[r.stops[d === 0 ? L : 0]].name;
+      for (let idx = 0; idx < T.deps[d].length; idx++) {
+        const t = T.deps[d][idx] + T.off[d][i]; if (t < G.t - 1) continue;
+        rows.push({ t, r, to, cancel: T.cancel[d].has(idx) && !T.past[d].has(idx) }); break;
+      }
+      // 같은 방향 다음 한 편 더
+      let c = 0; for (let idx = 0; idx < T.deps[d].length && c < 2; idx++) { const t = T.deps[d][idx] + T.off[d][i]; if (t < G.t - 1) continue; if (c === 1) rows.push({ t, r, to, cancel: T.cancel[d].has(idx) && !T.past[d].has(idx) }); c++; }
+    }
+  }
+  rows.sort((a, b) => a.t - b.t);
+  if (!rows.length) return '';
+  return `<div class="wbox"><div class="wsub">🚉 출발 안내</div>${rows.slice(0, 8).map(x => `<div class="wrow" style="grid-template-columns:auto minmax(0,1fr) auto"><b style="font-variant-numeric:tabular-nums">${tmin(x.t)}</b>
+    <span class="wlab"><span class="sw" style="display:inline-block;width:8px;height:8px;border-radius:2px;background:${x.r.color}"></span> ${kindIcon(x.r.kind)} ${esc(x.to)}행</span>
+    <span class="wnum">${x.cancel ? '<span class="neg">결행</span>' : ''}</span></div>`).join('')}</div>`;
+}
 // 노선 진단 상자: 열차가 더 필요한지
 const DIAG_BG = { more: '#fef2f2', less: '#fefce8', low: '#fefce8', ok: '#f0fdf4', none: '#f8fafc', wait: '#f8fafc' };
 function diagHtml(r) {
@@ -506,9 +588,8 @@ function routeHtml(r) {
     <div>오늘 승객 <b>${fmt(r.paxToday || 0)}</b>명 · 수입 ${won(r.revToday || 0)} · 운행비 ${won(r.costToday || 0)} · <span class="${profit >= 0 ? 'pos' : 'neg'}">${won(profit)}</span></div>
     <div>기다리는 승객 ${fmt(waiting)}명${r.leftToday ? ` · <span class="neg">만석으로 못 탄 승객 ${fmt(r.leftToday)}명</span>` : ''}</div>`;
   if (!S.routeOpen(r)) h += `<div class="neg">열리지 않은 지역을 지나 운행할 수 없습니다</div>`;
-  { const sr = S.spacingRatio(r);
-    h += `<div class="wsub">열차 ${ts.length}대${ts.length >= 2 ? ` · 간격 ${sr < 1.25 ? '<span class="pos">고름</span>' : `<span class="neg">들쭉날쭉 (가장 긴 간격이 고른 간격의 ${sr.toFixed(1)}배)</span>`}` : ''}</div>
-      ${ts.length >= 2 ? `<div class="btns" style="display:flex;gap:4px;margin:2px 0 6px"><button data-respace="${r.no}" ${sr < 1.05 ? 'disabled' : ''}>⇆ 열차 간격 고르게</button></div>` : ''}${upAllHtml(r)}`; }
+  h += ttSummaryHtml(r);
+  h += `<div class="wsub">열차 ${ts.length}대</div>${upAllHtml(r)}`;
   for (const t of ts) h += `<div class="bus">${trainLabel(t)} · ${t.pax.length}/${S.tierOf(t).cap}명<div class="btns">${upBtn(t)}<button data-recall="${t.id}">회수</button></div></div>`;
   const cand = G.depot.filter(t => t.kind === r.kind);
   h += `<div class="btns" style="display:flex;flex-wrap:wrap;gap:4px;margin-top:6px">
@@ -790,6 +871,7 @@ function renderHelp() {
     · 선로마다 시간당 다닐 수 있는 열차 수가 정해져 있습니다(단선 ${CFG.capSingle} · 복선 ${CFG.capDouble} · 고속선 ${CFG.capHs}). 넘치면 빨갛게 표시되고 느려집니다<br>
     · 역 모양 = 실제 하루 승차 인원(2025, 코레일): 점 간이역(200명 미만) · 동그라미 소형(200~) · 두 줄 동그라미 중형(1,000~) · 네모 대형(4,000~) · 두 줄 네모 초대형(12,000~). 게임 승객 1명 = 실제 ${Math.round(1 / CFG.demandScale)}명<br>
     · 역을 누르면 그 역 사람들이 가고 싶은 곳이 나옵니다. 아직 안 열린 지역으로 가려는 사람이 많으면 지역을 여세요<br>
+    · 🕐 시간표: 노선마다 첫차·막차와 시간대(새벽·출근·낮·퇴근·밤) 배차 간격. 기본은 열차 수에 맞춘 자동. 승객은 원하는 시각에 가까운 편을 예매하고 출발 10분 전에 옵니다. 편이 꽉 차면 매진이라 다음 편, 열차가 모자라면 결행<br>
     · 열차가 더 필요한지: 노선 카드 맨 위 판정을 보세요. 🔴 만석 = 열차 추가나 큰 등급, 🟠 배차 간격이 김 = 열차 추가, 🟡 남음 = 1대 빼도 됨, 🟢 적당<br>
     · 빠를수록(자동차보다), 자주 다닐수록 승객이 늘고, 오래 기다리면 떠납니다<br>
     · 승객은 한 번까지 갈아탑니다(예: 대경선 → 동대구 → KTX). 요금은 탄 열차마다 냅니다<br>
@@ -1315,6 +1397,8 @@ document.addEventListener('click', e => {
     if (err) toast(err); else toast(`${CFG.kinds[k].name} ${n}대를 ${CFG.kinds[k].levels[L].name}(으)로 올렸습니다${skip ? ` (비전철 노선 ${skip}대 제외)` : ''}`, '#15803d');
     refreshAll();
   }
+  else if (d.ttedit) openTTEdit(findR(d.ttedit));
+  else if (d.ttview) openTTView(findR(d.ttview));
   else if (d.respace) { const r = findR(d.respace); check(S.respaceRoute(r), `${S.routeTitle(r)}: 열차 ${S.routeTrains(r).length}대를 같은 간격으로 놓았습니다`); }
   else if (d.upall) {
     const [no, L] = d.upall.split(':').map(Number), r = findR(no);
@@ -1400,6 +1484,10 @@ function endDay() {
       ${M.commute ? `<tr><td>통근 승객 (광역열차)</td><td>${fmt(M.commute)}명</td></tr>` : ''}
       <tr><td>기다리다 떠난 승객</td><td>${fmt(M.gaveUp)}명</td></tr>
       <tr><td>만석으로 못 탄 승객</td><td class="${M.leftBehind ? 'neg' : ''}">${fmt(M.leftBehind)}명</td></tr>
+      <tr><td>정시율 (5분 이내 도착)</td><td>${M.runsDone ? Math.round(M.onTime / M.runsDone * 100) + '%' : '-'} <span class="muted">(${fmt(M.runsDone || 0)}편)</span></td></tr>
+      <tr><td>결행</td><td class="${M.cancel ? 'neg' : ''}">${fmt(M.cancel || 0)}편</td></tr>
+      <tr><td>매진으로 다음 편 예매</td><td>${fmt(M.soldOut || 0)}번</td></tr>
+      <tr><td>시간표가 안 맞아 안 탄 승객</td><td>${fmt(M.noRun || 0)}명</td></tr>
       <tr><td>수요 충족률</td><td>${M.cover.toFixed(1)}%</td></tr>
       <tr><td>평균 만족도</td><td>${M.sat == null ? '-' : M.sat.toFixed(0) + '%'}</td></tr>
       <tr><td>평판 (수요 배율)</td><td>${(M.rep * 100).toFixed(0)}% <span class="${repDiff >= 0 ? 'pos' : 'neg'}">(${repDiff >= 0 ? '+' : ''}${repDiff.toFixed(1)})</span></td></tr>

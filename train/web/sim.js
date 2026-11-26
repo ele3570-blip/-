@@ -60,6 +60,8 @@ const CFG = {
   repStart: 1.0, repMin: 0.6, repMax: 1.4, repSpeed: 0.35,
   psoMinSat: 60, psoRatio: 0.5,    // 공익서비스 보상: 적자라도 만족도가 높으면 적자의 50%
   dayStartMin: 5 * 60, dayEndMin: 24 * 60,
+  // 시간표: 첫차·막차, 종착역 돌아서는 시간, 승객이 기다려 줄 수 있는 최대 시간(일반·통근), 역에 오는 시각(출발 몇 분 전), 늦은 편을 결행으로 보는 시간
+  tt: { first: 330, last: 1380, turnMin: 5, maxWait: 150, maxWaitCommute: 45, appearBefore: 10, lateGrace: 20, onTimeMin: 5 },
   // 통근 수요(광역열차 전용): 코레일 승하차 자료에 거의 없는 짧은 출퇴근 이동을 더함
   //  두 역 하루(게임) 통근 = k × √(승차A × 승차B) × e^(−거리/decayKm) × 배차 배율(0.1 + 0.9·e^(−배차/freqMin))
   //  minKm~maxKm 사이만. 출퇴근 시간(7~9시, 17~19시)에 몰림
@@ -175,7 +177,8 @@ const freshState = () => ({
   ownedSecs: new Set(), ownedSt: new Set(), // 산 선로 구간, 산 역
   lineUp: {},            // lineId → { elec, dbl, speed(+km/h) }
   routes: [], trains: [], depot: [], nextRouteNo: 1, nextTrainId: 1,
-  waiting: new Map(),    // stationId → [passenger]
+  waiting: new Map(),    // stationId → [passenger] (역에 와서 기다리는 승객)
+  pend: [],              // 예매하고 아직 역에 안 온 승객
   today: null, rep: CFG.repStart, history: [],
   debt: 0, negDays: 0, over: false, // 빚, 자금이 마이너스로 끝난 날 수, 파산
   totalRev: 0, shownLevel: 1, // 누적 운임 수입(레벨), 화면에서 알린 레벨
@@ -188,7 +191,7 @@ const level = () => levelOf();
 const levelNeed = lv => CFG.levels[lv - 1]?.need;
 const needTrain = (kind, lvl) => CFG.gate.train[`${kind}:${lvl}`] || 1;
 const lvErr = need => level() < need ? `회사 레벨 ${need}부터 할 수 있습니다 (지금 Lv${level()})` : null;
-function newToday() { return { commute: 0, commuteSpawned: 0, interest: 0, pax: 0, transfers: 0, revenue: 0, cost: 0, potential: 0, spawned: 0, satSum: 0, satN: 0, gaveUp: 0, leftBehind: 0, trainKm: 0, bought: 0 }; }
+function newToday() { return { soldOut: 0, noRun: 0, cancel: 0, runsDone: 0, onTime: 0, delaySum: 0, commute: 0, commuteSpawned: 0, interest: 0, pax: 0, transfers: 0, revenue: 0, cost: 0, potential: 0, spawned: 0, satSum: 0, satN: 0, gaveUp: 0, leftBehind: 0, trainKm: 0, bought: 0 }; }
 G.today = newToday();
 // 달력: 실제 달력. day 1 = CFG.startDate
 const WEEK = '일월화수목금토';
@@ -296,7 +299,124 @@ function cycleMinutes(r, tier = refTier(r)) {
   for (const leg of r.legs) m += legMinutes(leg, tier);
   return 2 * m + 2 * r.stops.length * (CFG.dwellBase + 0.3);
 }
-function headway(r) { const n = routeTrains(r).length; return n ? cycleMinutes(r) / n : Infinity; }
+// 한 방향 배차 간격: 시간표의 평균 간격(열차 없으면 ∞)
+function headway(r) {
+  const n = routeTrains(r).length; if (!n) return Infinity;
+  const d = r.T?.deps?.[0]; if (!d || d.length < 2) return d && d.length ? 240 : Infinity;
+  return Math.min(240, (d[d.length - 1] - d[0]) / (d.length - 1));
+}
+
+// ───────────────────────── 시간표 ─────────────────────────
+// 시간대(새벽·출근·낮·퇴근·밤)마다 배차 간격(분, 0 = 운행 안 함). 자동이면 열차 수에 맞춰 모든 시간대 같은 간격
+const TT_BANDS = [
+  { id: 'dawn', name: '새벽', from: 300, to: 420 }, { id: 'am', name: '출근', from: 420, to: 540 },
+  { id: 'day', name: '낮', from: 540, to: 1020 }, { id: 'pm', name: '퇴근', from: 1020, to: 1140 }, { id: 'night', name: '밤', from: 1140, to: 1440 },
+];
+const NICE_HW = [5, 6, 8, 10, 12, 15, 20, 25, 30, 40, 45, 60, 75, 90, 120, 150, 180, 240];
+const defaultTT = () => ({ auto: true, first: CFG.tt.first, last: CFG.tt.last, hw: { dawn: 60, am: 60, day: 60, pm: 60, night: 60 } });
+const ttOf = r => r.tt || (r.tt = defaultTT());
+// 한쪽 종착역 출발 → 반대쪽 도착(분). 참고 열차 기준
+function oneWayMin(r, tier = refTier(r)) { let m = 0; for (const l of r.legs) m += legMinutes(l, tier); return m + CFG.dwellBase * Math.max(0, r.stops.length - 2); }
+function autoHw(r, n) { const raw = 2 * (oneWayMin(r) + CFG.tt.turnMin) / Math.max(1, n); return NICE_HW.find(x => x >= raw - 0.01) || 240; }
+function bandAt(t) { return TT_BANDS.find(b => t >= b.from && t < b.to) || TT_BANDS[TT_BANDS.length - 1]; }
+function depsOf(tt) {
+  const out = []; let t = tt.first;
+  while (t <= tt.last) { const b = bandAt(t), h = tt.hw[b.id]; if (!h) { t = b.to; continue; } out.push(Math.round(t)); t += h; }
+  return out;
+}
+// 시간표를 돌리는 데 필요한 열차: 출발 순서대로 그 종착역에 준비된 열차를 쓰고, 없으면 한 대 더. starts = 열차마다 첫 편
+function planTrains(deps, oneWay) {   // deps = [가는 방향 출발표, 오는 방향 출발표]
+  const runs = [];
+  for (let d = 0; d < 2; d++) deps[d].forEach((t, idx) => runs.push({ t, d, idx }));
+  runs.sort((a, b) => a.t - b.t || a.d - b.d);
+  const pool = [[], []], starts = [];
+  for (const run of runs) {
+    const p = pool[run.d], k = p.findIndex(x => x <= run.t + 1);   // 1분 여유(반올림·작은 지연)
+    if (k >= 0) p.splice(k, 1); else starts.push(run);
+    pool[1 - run.d].push(run.t + oneWay + CFG.tt.turnMin);
+  }
+  return { need: starts.length, starts };
+}
+// 노선 시간표 계산(바뀐 게 없으면 그대로 두어 예매·배정을 지킴)
+let ttVer = 0;
+function ttBuild(r) {
+  const tt = ttOf(r), n = routeTrains(r).length;
+  if (tt.auto) { const h = autoHw(r, n); for (const b of TT_BANDS) tt.hw[b.id] = h; }
+  const tier = refTier(r), ow = oneWayMin(r, tier);
+  const sig = JSON.stringify([tt, n, Math.round(ow), r.stops, tier.name]);
+  if (r.T && r.T.sig === sig) return false;
+  const L = r.legs.length, off = [[0], []];
+  r.legs.forEach((l, k) => off[0].push(off[0][k] + legMinutes(l, tier) + CFG.dwellBase));
+  off[1][L] = 0; for (let k = L - 1; k >= 0; k--) off[1][k] = off[1][k + 1] + legMinutes(r.legs[k], tier) + CFG.dwellBase;
+  // 반대쪽 종착역 출발은 '도착 + 돌아서는 시간'만큼 밀어서, 열차가 왕복하며 빈틈없이 맞물리게
+  const d0 = depsOf(tt), h0 = d0.length > 1 ? d0[1] - d0[0] : 60, shift = (ow + CFG.tt.turnMin) % h0;
+  const d1 = d0.map(x => Math.round(x + shift)).filter(x => x <= Math.max(tt.last + shift, tt.last));
+  const deps = [d0, d1], plan = planTrains(deps, ow);
+  r.T = { sig, ver: ++ttVer, deps, off, oneWay: ow, need: plan.need, starts: plan.starts,
+    taken: [new Set(), new Set()], cancel: [new Set(), new Set()], past: [new Set(), new Set()], load: [[], []] };
+  // 하루 중간에 바뀌었으면 이미 지난 편은 결행으로 세지 않음
+  for (let d = 0; d < 2; d++) deps[d].forEach((x, idx) => { if (x < G.t - 0.01 && G.t > CFG.dayStartMin) { r.T.cancel[d].add(idx); r.T.past[d].add(idx); } });
+  // 이 노선 열차들: 가던 편은 시간표 없이 끝까지 가고, 서 있던 열차는 새 편 배정
+  for (const t of routeTrains(r)) { if (t.run) t.run = { d: t.run.d, idx: -1 }; if (t.legDur == null && isTerminal(t)) t.run = null; }
+  return true;
+}
+const isTerminal = t => t.i === 0 || t.i === t.route.stops.length - 1;
+// 종착역에 선 열차에게 다음 편 주기(그 종착역에서 아직 아무도 안 맡은 가장 이른 편). 없으면 쉼
+function assignNext(t, minGap = 0) {
+  const r = t.route, T = r.T; if (!T || !isTerminal(t)) { t.run = null; return false; }
+  const d = t.i === 0 ? 0 : 1;
+  const D = T.deps[d];
+  for (let idx = 0; idx < D.length; idx++) {
+    if (T.taken[d].has(idx) || T.cancel[d].has(idx)) continue;
+    if (D[idx] < G.t - CFG.tt.lateGrace) continue;             // 이미 한참 지난 편은 건너뜀(결행 처리됨)
+    T.taken[d].add(idx);
+    // 늦게 들어왔으면 최소한만 돌아서고 바로 출발(지연 운행)
+    Object.assign(t, { run: { d, idx }, dir: d === 0 ? 1 : -1, dwell: Math.max(minGap ? Math.min(minGap, 2) : 0.01, D[idx] - G.t), legDur: null, legT: 0 });
+    return true;
+  }
+  t.run = null; t.dwell = 0; return false;
+}
+// 하루 시작: 계획대로 열차를 종착역에 두고 첫 편 배정
+function layoutRoute(r) {
+  const T = r.T; if (!T) return;
+  T.taken = [new Set(), new Set()]; T.cancel = [new Set(), new Set()]; T.load = [[], []];
+  const ts = routeTrains(r), L = r.stops.length - 1;
+  ts.forEach((t, k) => {
+    const st = T.starts[k];
+    Object.assign(t, { pax: [], legT: 0, legDur: null, run: null, dwell: 0 });
+    if (!st) { t.i = 0; t.dir = 1; return; }        // 남는 열차: 1번 역에서 대기(빈 편이 생기면 나감)
+    t.i = st.d === 0 ? 0 : L; t.dir = st.d === 0 ? 1 : -1;
+    T.taken[st.d].add(st.idx);
+    t.run = { d: st.d, idx: st.idx }; t.dwell = Math.max(0.01, T.deps[st.d][st.idx] - G.t);
+  });
+}
+// 승객 예매: opts 중 희망 시각 t0 이후 가장 이른, 자리 남은 편. 반환 { r, d, idx, dep(이 역 출발), j, x, r2, a, b }
+function bookRun(sid, dest, opts, t0, maxWait = CFG.tt.maxWait) {
+  let best = null, sold = false;
+  for (const o of opts) {
+    const r = o.r; if (!r || !r.active || !r.T) continue;
+    const i = r.idxOf.get(sid), j = r.idxOf.get(o.x ?? dest); if (i == null || j == null || i === j) continue;
+    const d = j > i ? 0 : 1, T = r.T, off = T.off[d][i], cap = refTier(r).cap, a = Math.min(i, j), b = Math.max(i, j);
+    for (let idx = 0; idx < T.deps[d].length; idx++) {
+      const dep = T.deps[d][idx] + off; if (dep < t0) continue; if (best && dep >= best.dep) break;
+      if (T.cancel[d].has(idx)) continue;
+      const Ld = T.load[d][idx] || (T.load[d][idx] = new Uint16Array(r.legs.length));
+      let ok = true; for (let k = a; k < b; k++) if (Ld[k] >= cap) { ok = false; break; }
+      if (!ok) { sold = true; continue; }
+      best = { r, ver: T.ver, d, idx, dep, j, a, b, x: o.x ?? null, r2: o.r2 ?? null }; break;
+    }
+  }
+  if (sold) G.today.soldOut++;
+  if (!best || best.dep - t0 > maxWait) return null;
+  const Ld = best.r.T.load[best.d][best.idx]; for (let k = best.a; k < best.b; k++) Ld[k]++;
+  return best;
+}
+function unbook(run) {
+  if (!run || !run.r.T || run.r.T.ver !== run.ver) return;
+  const Ld = run.r.T.load[run.d][run.idx]; if (Ld) for (let k = run.a; k < run.b; k++) if (Ld[k]) Ld[k]--;
+}
+// 예매한 승객을 출발 몇 분 전에 역에 나타나게(그 전에는 대기 목록에만)
+function pend(sid, p) { p.sid = sid; p.since = Math.max(G.t, p.run.dep - CFG.tt.appearBefore); G.pend.push(p); }
 
 // ───────────────────────── 네트워크 계산 ─────────────────────────
 let edgeLoad = new Map();       // 엣지 → 시간당 열차 수(양방향)
@@ -368,6 +488,7 @@ function rebuildNetwork() {
     // 역 i → j 시간 = |cumMin[j] - cumMin[i]| - 정차시간 (참고 열차 기준)
     const tier = refTier(r);
     r.cumMin = [0]; r.legs.forEach((l, k) => r.cumMin.push(r.cumMin[k] + legMinutes(l, tier) + CFG.dwellBase));
+    ttBuild(r);
     r.hw = headway(r);
     for (const id of r.stops) { if (!servedBy.has(id)) servedBy.set(id, []); servedBy.get(id).push(r); }
   }
@@ -440,13 +561,17 @@ function rebuildNetwork() {
     }
     for (const [o, T] of commuteTable) { const list = [], cum = []; let acc = 0; for (const [d, e] of T) { acc += e.w; list.push(d); cum.push(acc); } commuteTable.set(o, { list, cum, total: acc, map: T }); }
   }
-  // 기다리는 승객: 바뀐 노선으로 다시 계획, 갈 수 없으면 돌려보냄
-  for (const [sid, q] of G.waiting) {
-    G.waiting.set(sid, q.filter(p => {
-      if (p.fixed && G.routes.includes(p.fixed) && p.fixed.active && p.fixed.idxOf.has(sid) && p.fixed.idxOf.has(p.dest)) { p.opts = [{ r: p.fixed }]; return true; }
-      p.fixed = null; p.opts = p.commute ? (commuteTable.get(sid)?.map.get(p.dest)?.opts || []) : planFrom(sid, p.dest); return p.opts.length > 0;
-    }));
-  }
+  // 기다리는(또는 예매한) 승객: 시간표가 바뀐 노선이면 다시 예매, 갈 수 없으면 돌려보냄
+  const rebook = (sid, p) => {
+    if (p.run && G.routes.includes(p.run.r) && p.run.r.active && p.run.r.T && p.run.r.T.ver === p.run.ver) return true;
+    if (p.fixed && G.routes.includes(p.fixed) && p.fixed.active && p.fixed.idxOf.has(sid) && p.fixed.idxOf.has(p.dest)) p.opts = [{ r: p.fixed }];
+    else { p.fixed = null; p.opts = p.commute ? (commuteTable.get(sid)?.map.get(p.dest)?.opts || []) : planFrom(sid, p.dest); }
+    if (!p.opts.length) return false;
+    p.run = bookRun(sid, p.dest, p.opts, G.t, p.commute ? CFG.tt.maxWaitCommute : CFG.tt.maxWait);
+    return !!p.run;
+  };
+  for (const [sid, q] of G.waiting) G.waiting.set(sid, q.filter(p => rebook(sid, p)));
+  G.pend = G.pend.filter(p => rebook(p.sid, p) && (p.since = Math.max(G.t, p.run.dep - CFG.tt.appearBefore), true));
 }
 // 출발역에서 목적지까지 방법: [{ r, x?, r2? }] (x = 갈아타는 역)
 function planFrom(sid, dest) { return destTable.get(sid)?.best.get(dest)?.opts || []; }
@@ -473,8 +598,10 @@ function spawn(dt) {
       while (lo < hi) { const m = (lo + hi) >> 1; if (T.cum[m] < x) lo = m + 1; else hi = m; }
       const dest = T.list[lo];
       G.today.spawned++;
-      if (!G.waiting.has(s.id)) G.waiting.set(s.id, []);
-      G.waiting.get(s.id).push({ dest, opts: T.best.get(dest).opts, start: G.t, since: G.t, patience: patience() });
+      // 시간표에서 가장 이른 탈 수 있는 편을 예매하고, 출발 몇 분 전에 역에 옴
+      const opts = T.best.get(dest).opts, run = bookRun(s.id, dest, opts, G.t + 5);
+      if (!run) { G.today.noRun++; continue; }
+      pend(s.id, { dest, opts, run, start: G.t, patience: patience() });
     }
     spawnAcc.set(s.id, a);
   }
@@ -490,8 +617,9 @@ function spawn(dt) {
       while (lo < hi) { const m = (lo + hi) >> 1; if (T.cum[m] < x) lo = m + 1; else hi = m; }
       const dest = T.list[lo];
       G.today.spawned++; G.today.commuteSpawned++;
-      if (!G.waiting.has(oid)) G.waiting.set(oid, []);
-      G.waiting.get(oid).push({ dest, opts: T.map.get(dest).opts, start: G.t, since: G.t, patience: Math.min(40, patience()), commute: true });
+      const opts = T.map.get(dest).opts, run = bookRun(oid, dest, opts, G.t + 5, CFG.tt.maxWaitCommute);
+      if (!run) { G.today.noRun++; continue; }
+      pend(oid, { dest, opts, run, start: G.t, patience: Math.min(40, patience()), commute: true });
     }
     spawnAccC.set(oid, a);
   }
@@ -510,64 +638,68 @@ function nextIdx(t) {
   if (t.i + dir < 0 || t.i + dir >= n) dir = -dir;
   return { j: t.i + dir, dir };
 }
+// 역에 도착: 내릴 승객 내리고(갈아탈 사람은 다음 편 예매), 탈 승객 태우고, 시간표보다 일찍 떠나지 않게 기다림
 function arrive(t) {
-  const r = t.route, sid = r.stops[t.i], tier = tierOf(t);
+  const r = t.route, sid = r.stops[t.i];
   let moved = 0;
   const stay = [];
   for (const p of t.pax) {
     if (p.j !== t.i) { stay.push(p); continue; }
     moved++;
     if (p.next) {
-      // 갈아타기: 다음 노선을 기다림. 그 노선이 없어졌으면 다시 계획
       const n = p.next;
       const ok = G.routes.includes(n) && n.active && n.idxOf.has(sid) && n.idxOf.has(p.dest);
       const opts = ok ? [{ r: n }] : planFrom(sid, p.dest).filter(o => !o.x);
-      if (!opts.length) { G.today.gaveUp++; continue; }
+      const run = opts.length ? bookRun(sid, p.dest, opts, G.t + 3) : null;
+      if (!run) { G.today.gaveUp++; continue; }
       G.today.transfers++;
-      if (!G.waiting.has(sid)) G.waiting.set(sid, []);
-      G.waiting.get(sid).push({ dest: p.dest, opts, fixed: ok ? n : null, start: p.start, since: G.t, patience: patience(), paid: true, transfer: true });
+      pend(sid, { dest: p.dest, opts, run, fixed: ok ? n : null, start: p.start, patience: patience(), paid: true, transfer: true, commute: p.commute });
     } else { G.today.pax++; r.paxToday = (r.paxToday || 0) + 1; }
   }
   t.pax = stay;
-  const { dir } = nextIdx(t);
-  const q = G.waiting.get(sid);
-  if (q && q.length) {
-    const left = [];
-    for (const p of q) {
-      // 이 열차로 갈 수 있는 방법: 같은 노선이고, 내릴 역(갈아탈 역 또는 목적지)이 가는 방향에 있음
-      let opt = null, j;
-      for (const o of p.opts) {
-        if (o.r !== r) continue;
-        const jj = r.idxOf.get(o.x ?? p.dest);
-        if (jj !== undefined && (jj - t.i) * dir > 0) { opt = o; j = jj; break; }
-      }
-      if (!opt) { left.push(p); continue; }
-      if (t.pax.length >= tier.cap) {
-        rs(r).full++;
-        if (!p.leftBehind) { p.leftBehind = true; G.today.leftBehind++; r.leftToday = (r.leftToday || 0) + 1; rs(r).leftU++; }
-        left.push(p); continue;
-      }
-      const fare = fareFor(tier, rideKm(r, t.i, j));
-      G.money += fare; G.today.revenue += fare; G.totalRev += fare; r.revToday = (r.revToday || 0) + fare;
-      if (!p.paid) { p.paid = true; recordSat(G.t - p.start, tier.comfort); if (p.commute) G.today.commute++; }
-      { const st = rs(r); st.board++; st.waitSum += G.t - p.since; }
-      t.pax.push({ dest: p.dest, j, next: opt.x != null ? opt.r2 : null, start: p.start });
-      moved++;
-    }
-    G.waiting.set(sid, left);
-  }
+  moved += board(t);
   t.dwell = CFG.dwellBase + moved * CFG.dwellPerPax;
-  // 종착역: 앞차가 방금 떠났으면 간격을 맞추려고 기다림
-  if (t.i === 0 || t.i === r.stops.length - 1) {
-    const n = routeTrains(r).length;
-    if (n > 1) {
-      r.lastDep = r.lastDep || {};
-      const last = r.lastDep[t.i];
-      const want = CFG.holdRatio * cycleMinutes(r) / n;
-      if (last != null && G.t - last < want) t.dwell += Math.min(CFG.maxHoldMin, want - (G.t - last));
-      r.lastDep[t.i] = G.t + t.dwell;
+  const end = t.run && ((t.run.d === 0 && t.i === r.stops.length - 1) || (t.run.d === 1 && t.i === 0));
+  if (end) { // 편 끝: 정시 기록, 돌아서서 다음 편
+    if (t.run.idx >= 0 && r.T) {
+      const sched = r.T.deps[t.run.d][t.run.idx] + r.T.off[t.run.d][t.i] - CFG.dwellBase, late = G.t - sched;
+      G.today.runsDone++; G.today.delaySum += Math.max(0, late); if (late <= CFG.tt.onTimeMin) G.today.onTime++;
     }
+    t.dwell = 0; assignNext(t, CFG.tt.turnMin);
+  } else if (t.run && t.run.idx >= 0 && r.T) {
+    const sched = r.T.deps[t.run.d][t.run.idx] + r.T.off[t.run.d][t.i];
+    t.dwell = Math.max(t.dwell, sched - G.t);               // 시간표보다 일찍 떠나지 않음
   }
+}
+// 이 역에서 이 열차(편)로 갈 승객 태우기. 태운 수를 돌려줌
+function board(t) {
+  const r = t.route, sid = r.stops[t.i], tier = tierOf(t), q = G.waiting.get(sid);
+  if (!q || !q.length || !t.run) return 0;
+  const dir = t.run.d === 0 ? 1 : -1;
+  let moved = 0; const left = [];
+  for (const p of q) {
+    let j = null, x = null, r2 = null;
+    if (p.run && p.run.r === r) {
+      // 예매한 편이거나, 그 편이 결행·지연돼 같은 방향 뒷 편이 온 경우
+      if (p.run.d === t.run.d && (p.run.idx <= t.run.idx || t.run.idx < 0 || p.run.ver !== r.T?.ver)) { j = p.run.j; x = p.run.x; r2 = p.run.r2; }
+    } else if (!p.run) {
+      for (const o of p.opts) { if (o.r !== r) continue; const jj = r.idxOf.get(o.x ?? p.dest); if (jj !== undefined && (jj - t.i) * dir > 0) { j = jj; x = o.x ?? null; r2 = o.r2 ?? null; break; } }
+    }
+    if (j == null || (j - t.i) * dir <= 0) { left.push(p); continue; }
+    if (t.pax.length >= tier.cap) {
+      rs(r).full++;
+      if (!p.leftBehind) { p.leftBehind = true; G.today.leftBehind++; r.leftToday = (r.leftToday || 0) + 1; rs(r).leftU++; }
+      left.push(p); continue;
+    }
+    const fare = fareFor(tier, rideKm(r, t.i, j));
+    G.money += fare; G.today.revenue += fare; G.totalRev += fare; r.revToday = (r.revToday || 0) + fare;
+    if (!p.paid) { p.paid = true; recordSat(G.t - p.start, tier.comfort); if (p.commute) G.today.commute++; }
+    { const st = rs(r); st.board++; st.waitSum += G.t - p.since; }
+    t.pax.push({ dest: p.dest, j, next: x != null ? r2 : null, start: p.start, commute: p.commute });
+    moved++;
+  }
+  G.waiting.set(sid, left);
+  return moved;
 }
 function startLeg(t) {
   const { j } = nextIdx(t);
@@ -579,15 +711,15 @@ function stepTrains(dt) {
   for (const t of G.trains) {
     let rem = dt;
     while (rem > 0) {
-      if (t.dwell > 0) { const u = Math.min(t.dwell, rem); t.dwell -= u; rem -= u; if (t.dwell <= 0) startLeg(t); continue; }
-      if (t.legDur == null) startLeg(t);
+      if (!t.run) { if (!assignNext(t)) break; }            // 맡은 편이 없으면 종착역에서 쉼(빈 편이 생기면 나감)
+      if (t.dwell > 0) { const u = Math.min(t.dwell, rem); t.dwell -= u; rem -= u; if (t.dwell <= 0) { board(t); startLeg(t); } continue; }
+      if (t.legDur == null) { board(t); startLeg(t); }
       const need = t.legDur - t.legT;
       if (need > rem) { t.legT += rem; rem = 0; }
       else {
         rem -= need;
         const { j, dir } = nextIdx(t);
         const leg = t.route.legs[Math.min(t.i, j)], tier = tierOf(t);
-        // 운행비: km당 + 고속선 사용료
         let c = leg.km * tier.perKm;
         for (const e of leg.edges) if (e.line.kind === 'hs') c += e.km * CFG.hsTrackFeePerKm;
         G.money -= c; G.today.cost += c; G.today.trainKm += leg.km; t.route.costToday = (t.route.costToday || 0) + c;
@@ -598,20 +730,48 @@ function stepTrains(dt) {
     }
   }
 }
+// 예매하고 기다리는 승객: 탈 편이 출발 예정보다 한참(참을성) 지나도 안 오면 포기. 예매 없는 승객은 기다린 시간으로
 function giveUps() {
   for (const [sid, q] of G.waiting) {
     if (!q.length) continue;
-    const keep = q.filter(p => G.t - p.since <= p.patience);
-    const n = q.length - keep.length;
-    if (n) for (const p of q) if (G.t - p.since > p.patience) { const r = p.opts?.[0]?.r; if (r) rs(r).gave++; }
-    if (n) { G.today.gaveUp += n; G.today.satN += n; }
+    const keep = [];
+    for (const p of q) {
+      const limit = p.run ? p.run.dep + Math.max(CFG.tt.lateGrace, p.patience) : p.since + p.patience;
+      if (G.t <= limit) { keep.push(p); continue; }
+      unbook(p.run); const r = p.run?.r || p.opts?.[0]?.r; if (r) rs(r).gave++;
+      G.today.gaveUp++; G.today.satN++;
+    }
     G.waiting.set(sid, keep);
+  }
+}
+// 예매한 승객이 역에 나타남(출발 몇 분 전)
+function arrivePend() {
+  if (!G.pend.length) return;
+  const keep = [];
+  for (const p of G.pend) {
+    if (p.since > G.t) { keep.push(p); continue; }
+    if (!G.waiting.has(p.sid)) G.waiting.set(p.sid, []);
+    G.waiting.get(p.sid).push(p);
+  }
+  G.pend = keep;
+}
+// 출발 시각이 한참 지나도 맡은 열차가 없는 편 = 결행
+function checkCancels() {
+  for (const r of G.routes) {
+    const T = r.T; if (!r.active || !T) continue;
+    for (let d = 0; d < 2; d++) for (let idx = 0; idx < T.deps[d].length; idx++) {
+      if (T.deps[d][idx] >= G.t - CFG.tt.lateGrace) break;
+      if (T.taken[d].has(idx) || T.cancel[d].has(idx)) continue;
+      T.cancel[d].add(idx); G.today.cancel++; r.cancelToday = (r.cancelToday || 0) + 1;
+    }
   }
 }
 function tick(dt) {
   spawn(dt);
+  arrivePend();
   stepTrains(dt);
   giveUps();
+  checkCancels();
   G.t += dt;
 }
 function satPct() { return G.today.satN ? G.today.satSum / G.today.satN : null; }
@@ -658,7 +818,7 @@ function closeDay() {
   if (G.history.length > 60) G.history.shift();
   // 이번 달 누계
   const M = G.mon;
-  M.days++; M.commute = (M.commute || 0) + T.commute; M.pax += T.pax; M.transfers += T.transfers; M.gaveUp += T.gaveUp; M.leftBehind += T.leftBehind; M.potential += T.potential;
+  M.days++; M.commute = (M.commute || 0) + T.commute; for (const k of ['runsDone', 'onTime', 'cancel', 'soldOut', 'noRun']) M[k] = (M[k] || 0) + (T[k] || 0); M.pax += T.pax; M.transfers += T.transfers; M.gaveUp += T.gaveUp; M.leftBehind += T.leftBehind; M.potential += T.potential;
   M.revenue += T.revenue; M.opCost += T.cost - fixed; M.fixed += fixed; M.interest += interest; M.pso += pso; M.bought += T.bought; M.trainKm += T.trainKm;
   if (sat != null) { M.satSum += sat; M.satDays++; }
   M.sold.push(...sold); M.negMax = Math.max(M.negMax, G.negDays);
@@ -681,9 +841,13 @@ function startMonth() { G.mon = newMonth(); G.mon.startDay = G.day; for (const r
 function startNextDay() {
   G.day++; G.t = CFG.dayStartMin; G.today = newToday();
   G.waiting = new Map(); spawnAcc.clear();
+  G.pend = [];
   for (const t of G.trains) t.pax = [];
-  for (const r of G.routes) { r.yest = r.st; r.st = null; r.yestRev = r.revToday || 0; r.yestCost = r.costToday || 0; r.paxToday = 0; r.revToday = 0; r.costToday = 0; r.leftToday = 0; r.lastDep = {}; }
+  for (const r of G.routes) { r.yest = r.st; r.st = null; r.yestRev = r.revToday || 0; r.yestCost = r.costToday || 0; r.paxToday = 0; r.revToday = 0; r.costToday = 0; r.leftToday = 0; r.cancelToday = 0; r.lastDep = {}; }
+  layoutAll();
 }
+// 모든 노선 열차를 시간표 첫 편에 맞춰 종착역에 배치
+function layoutAll() { for (const r of G.routes) { if (r.active && r.T) layoutRoute(r); else for (const t of routeTrains(r)) Object.assign(t, { i: 0, dir: 1, run: null, dwell: 0, legDur: null, legT: 0, pax: [] }); } }
 
 // ───────────────────────── 노선 진단: 열차가 더 필요한가 ─────────────────────────
 // 노선 하루 기록: 좌석km·승객km(승차율), 탄 승객·대기 시간, 만석으로 못 탄 횟수, 기다리다 떠난 승객
@@ -718,6 +882,9 @@ function recommendTrains(r, n, occ, st, rev, cost) {
 function routeDiag(r) {
   const n = routeTrains(r).length;
   if (!n) return { level: 'none', label: '열차 없음', icon: '⚪', advice: '열차를 배차하세요' };
+  // 직접 짠 시간표인데 열차가 모자라면: 결행이 생김
+  if (r.tt && !r.tt.auto && r.T && n < r.T.need)
+    return { level: 'more', icon: '🔴', label: '열차 부족(결행)', advice: `이 시간표는 열차 ${r.T.need}대가 필요한데 ${n}대뿐이라 결행이 생깁니다. 열차를 늘리거나 시간표 간격을 넓히세요`, n, rec: r.T.need, nMax: Infinity };
   const today = r.st, useY = (!today || today.board < 20) && r.yest && r.yest.board >= 20;
   const st = useY ? r.yest : today;
   if (!st || st.board < 5) return { level: 'wait', label: '집계 중', icon: '⏳', advice: '운행 기록이 쌓이면 알려 드립니다', n };
@@ -813,30 +980,26 @@ function placeAt(t, r, p, segs) {
 function dispatch(t, r) {
   const err = canDispatch(t, r); if (err) return { err };
   G.depot = G.depot.filter(x => x !== t);
-  t.pax = [];
-  // 운행 중인 열차들 사이에서 가장 큰 빈 간격의 한가운데에 넣음 → 몇 대를 넣어도 간격이 고름
-  const ts = routeTrains(r);
-  if (!ts.length) Object.assign(t, { route: r, i: 0, dir: 1, legT: 0, legDur: null, dwell: 0.5 });
-  else {
-    const segs = cycleSegs(r, refTier(r)), C = segs.reduce((a, x) => a + x.d, 0);
-    const ps = ts.map(o => cyclePos(o, segs)).sort((a, b) => a - b);
-    let best = { gap: -1, at: 0 };
-    ps.forEach((p, k) => { const nx = k + 1 < ps.length ? ps[k + 1] : ps[0] + C, gap = nx - p; if (gap > best.gap) best = { gap, at: p + gap / 2 }; });
-    placeAt(t, r, best.at, segs);
-  }
-  if (r.lastDep) r.lastDep = {};
+  Object.assign(t, { route: r, pax: [], legT: 0, legDur: null, dwell: 0, run: null, i: 0, dir: 1 });
   G.trains.push(t);
-  if (ts.length >= 1) respaceRoute(r); // 넣은 뒤 노선 전체를 같은 간격으로
-  rebuildNetwork();
+  rebuildNetwork();                 // 시간표 다시(자동이면 간격이 촘촘해짐)
+  // 아직 아무도 안 맡은 가장 이른 편이 있는 종착역에 세움
+  const T = r.T, L = r.stops.length - 1;
+  if (T) {
+    let best = null;
+    for (let d = 0; d < 2; d++) for (let idx = 0; idx < T.deps[d].length; idx++) {
+      if (T.taken[d].has(idx) || T.cancel[d].has(idx) || T.deps[d][idx] < G.t) continue;
+      if (!best || T.deps[d][idx] < best.t) best = { d, t: T.deps[d][idx] }; break;
+    }
+    if (best) { t.i = best.d === 0 ? 0 : L; t.dir = best.d === 0 ? 1 : -1; }
+    assignNext(t);
+  }
   return {};
 }
-// 노선 열차들을 한 바퀴에 같은 간격으로 다시 놓기(타고 있던 승객은 도착한 것으로 처리)
+// 노선 열차들을 시간표에 맞춰 종착역에 다시 배치(타고 있던 승객은 도착 처리)
 function respaceRoute(r) {
-  const ts = routeTrains(r); if (ts.length < 2) return { err: '열차가 2대 이상일 때 쓸 수 있습니다' };
-  const segs = cycleSegs(r, refTier(r)), C = segs.reduce((a, x) => a + x.d, 0);
-  const start = cyclePos(ts[0], segs);
-  ts.forEach((t, k) => { G.today.pax += t.pax.length; r.paxToday = (r.paxToday || 0) + t.pax.length; t.pax = []; placeAt(t, r, start + C * k / ts.length, segs); });
-  r.lastDep = {};
+  for (const t of routeTrains(r)) { G.today.pax += t.pax.length; t.pax = []; }
+  if (r.T) { const keepCancel = r.T.cancel, keepPast = r.T.past; layoutRoute(r); r.T.cancel = keepCancel; r.T.past = keepPast; }
   return {};
 }
 // 노선 열차 간격이 얼마나 고른지: 가장 긴 간격 ÷ 고른 간격 (1 = 완전히 고름)
@@ -851,7 +1014,7 @@ function recall(t) {
   G.trains = G.trains.filter(x => x !== t);
   const keep = { id: t.id, kind: t.kind, lvl: t.lvl, no: t.no };
   G.depot.push(keep);
-  if (t.route && G.routes.includes(t.route) && routeTrains(t.route).length >= 2) respaceRoute(t.route); // 빠진 자리 메우기
+  for (const p of t.pax) { G.today.pax++; }       // 타고 있던 승객은 도착 처리
   rebuildNetwork();
   return keep;
 }
@@ -1007,7 +1170,7 @@ function serialize() {
     kindsVer: 2, money: G.money, totalRev: G.totalRev, shownLevel: G.shownLevel, debt: G.debt, negDays: G.negDays, over: G.over, day: G.day, rep: G.rep, unlocked: [...G.unlocked], lineUp: G.lineUp, ownedSecs: [...G.ownedSecs], ownedSt: [...G.ownedSt],
     nextRouteNo: G.nextRouteNo, nextTrainId: G.nextTrainId, history: G.history,
     mon: G.mon,
-    routes: G.routes.map(r => ({ no: r.no, kind: r.kind, color: r.color, stops: r.stops, name: r.name, mon: r.mon })),
+    routes: G.routes.map(r => ({ no: r.no, kind: r.kind, color: r.color, stops: r.stops, name: r.name, mon: r.mon, tt: r.tt })),
     trains: G.trains.map(t => ({ id: t.id, no: t.no, kind: t.kind, lvl: t.lvl, route: t.route.no, i: t.i, dir: t.dir })),
     depot: G.depot.map(t => ({ id: t.id, no: t.no, kind: t.kind, lvl: t.lvl })),
   });
@@ -1045,7 +1208,9 @@ function deserialize(s) {
   }
   G.depot = o.depot.map(t => ({ ...t })).concat(G.depot.filter(x => !o.depot.some(y => y.id === x.id)));
   numberTrains(); // 예전 저장: 번호 없는 열차에 종류별 번호
+  G.pend = [];
   rebuildNetwork();
+  layoutAll();    // 불러오면 그날 아침: 시간표 첫 편에 맞춰 배치
 }
 // 게임을 처음 상태로(새 게임·불러오기 전에)
 function resetGame() {
@@ -1062,7 +1227,7 @@ function setupNewGame() {
   rebuildNetwork();
 }
 
-root.SIM = { respaceRoute, spacingRatio, get commuteTable() { return commuteTable; }, CFG, D, G, level, levelOf, levelNeed, needTrain, lvErr, resetGame, routeDiag, upgradeBlock, dateOf, isMonthEnd, monthReport, startMonth, assetValue, creditGrade, loanLimit, canBorrow, borrow, repay, stations, byName, lines, edges, adj, sections, secById, edgeOwned, stOwned, secOwned, stationPrice, buyStation,
+root.SIM = { TT_BANDS, NICE_HW, ttOf, depsOf, planTrains, oneWayMin, autoHw, ttBuild, layoutAll, respaceRoute, spacingRatio, get commuteTable() { return commuteTable; }, CFG, D, G, level, levelOf, levelNeed, needTrain, lvErr, resetGame, routeDiag, upgradeBlock, dateOf, isMonthEnd, monthReport, startMonth, assetValue, creditGrade, loanLimit, canBorrow, borrow, repay, stations, byName, lines, edges, adj, sections, secById, edgeOwned, stOwned, secOwned, stationPrice, buyStation,
   sectionPrice, buySection, missingSections, buySections, ownedKm, regionName, toKm, distKm, isOpen, lineElec, lineDbl, lineVmax, edgeOpen, edgeCap,
   kindOf, tierOf, needsElec, edgeAllowed, findPath, buildLegs, addRoute, routeTitle, routeKm, routeHasNonElec, routeOpen, routeTrains,
   legMinutes, edgeSpeed, cycleMinutes, headway, rideMinutes, rideKm, rebuildNetwork, planFrom, hourShare, peakAt, tick, satPct, closeDay, startNextDay,
