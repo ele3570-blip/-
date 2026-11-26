@@ -466,8 +466,9 @@ function routeHtml(r) {
   const oneWay = S.rideMinutes(r, 0, r.stops.length - 1), hw = S.headway(r);
   const waiting = r.stops.reduce((a, id) => a + (G.waiting.get(id) || []).filter(p => r.idxOf?.has(p.dest)).length, 0);
   const profit = (r.revToday || 0) - (r.costToday || 0);
-  let h = `<div><span class="sw" style="display:inline-block;width:12px;height:12px;border-radius:3px;background:${r.color};vertical-align:-1px"></span>
-    <b style="font-size:15px">${K.icon} ${esc(S.routeTitle(r))}</b> <span class="tag gray">${K.name}</span></div>
+  let h = `<div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap"><span class="sw" style="display:inline-block;width:12px;height:12px;border-radius:3px;background:${r.color}"></span>
+    <b style="font-size:15px">${K.icon} ${esc(S.routeTitle(r))}</b> <span class="tag gray">${K.name}</span>
+    <button data-edit="${r.no}" style="margin-left:auto;padding:3px 9px;font-size:12px">✏️ 정차역 수정</button></div>
     <div class="muted">${fmt(S.routeKm(r))}km · 정차 ${r.stops.length}역 · 편도 ${minTxt(oneWay)} · ${ts.length ? `배차 ${minTxt(hw)}마다` : '열차 없음'}</div>
     ${diagHtml(r)}
     ${routeTracksHtml(r)}
@@ -480,7 +481,7 @@ function routeHtml(r) {
   const cand = G.depot.filter(t => t.kind === r.kind);
   h += `<div class="btns" style="display:flex;flex-wrap:wrap;gap:4px;margin-top:6px">
     ${cand.length ? `<button class="primary" data-add="${r.no}">＋ 차량기지에서 배차 (${cand.length}대)</button>` : `<button data-buyadd="${r.no}">＋ ${K.name} 사서 배차 (${won(K.price)})</button>`}
-    <button data-edit="${r.no}">✏️ 정차역 수정</button><button data-del="${r.no}">🗑 삭제</button></div>`;
+    <button data-del="${r.no}">🗑 노선 삭제</button></div>`;
   return h;
 }
 function trainHtml(t) {
