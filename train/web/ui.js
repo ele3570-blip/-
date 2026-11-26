@@ -54,7 +54,7 @@ function ask(msg, yes = '확인') {
 function check(res, okMsg) { if (res && res.err) { toast(res.err); return false; } if (okMsg) toast(okMsg, '#15803d'); refreshAll(); return true; }
 const kindIcon = k => CFG.kinds[k].icon;
 // 조사: 받침 있으면 a, 없으면 b (예: josa('경북선', '이', '가') → '경북선이')
-const josa = (w, a, b) => { const c = String(w).charCodeAt(String(w).length - 1) - 0xAC00; return w + (c >= 0 && c < 11172 && c % 28 ? a : b); };
+const josa = (w, a, b) => { const t = String(w).replace(/\s*\([^)]*\)\s*$/, ''), c = t.charCodeAt(t.length - 1) - 0xAC00; return w + (c >= 0 && c < 11172 && c % 28 ? a : b); }; // 끝의 (괄호)는 빼고 받침 판단
 const trainLabel = t => `${kindIcon(t.kind)} ${t.no}호 ${S.tierOf(t).name}`;
 const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
 
@@ -822,15 +822,33 @@ function planLink(a, b, kind) {
   const B = stations[b];
   const P = S.findPath(a, b, kind);
   if (P && S.stOwned(b)) return { path: P, cost: 0, regions: [], secs: [], buySt: false };
-  const Q = P || S.findPath(a, b, kind, true) || S.findPath(a, b, kind, 'all');
+  let Q = P || S.findPath(a, b, kind, true) || S.findPath(a, b, kind, 'all');
+  let elec = [];
+  // 전철화가 필요한 열차(광역·KTX·ITX-마음)인데 비전철 선로 때문에 막히면: 일반열차 길로 잇고 그 선로를 전철화까지 함께 제안
+  if (!Q && (CFG.kinds[kind].elec || kind === 'ktx')) {
+    const Qg = S.findPath(a, b, 'general', true) || S.findPath(a, b, 'general', 'all');
+    if (Qg && !(kind === 'ktx' && Qg.edges.some(e => e.line.kind === 'hs' && lvLocked(CFG.gate.hs)))) {
+      elec = [...new Set(Qg.edges.filter(e => !S.lineElec(e.line)).map(e => e.line))];
+      if (elec.length) {
+        if (lvLocked(CFG.gate.work.elec)) return { err: `${josa(elec.map(l => l.name).join(', '), '이', '가')} 전철화되지 않았습니다. 전철화 공사는 회사 레벨 ${CFG.gate.work.elec}부터 할 수 있습니다` };
+        Q = Qg;
+      }
+    }
+  }
   if (!Q) return { err: whyNoLink(a, b, kind) };
   const regions = [];
   for (const id of Q.nodes) { const rg = stations[id].region; if (!G.unlocked.has(rg) && !regions.includes(rg)) regions.push(rg); }
   for (const rg of regions) if (lvLocked(regionLv(rg))) return { err: `${S.regionName[rg]} 지역을 지나야 하는데, 이 지역은 회사 레벨 ${regionLv(rg)}부터 열 수 있습니다` };
   const secs = S.missingSections(Q);
   const buySt = !S.stOwned(B);
-  const cost = regions.reduce((x, rg) => x + CFG.unlockCost[rg], 0) + secs.reduce((x, sc) => x + S.sectionPrice(sc), 0) + (buySt ? S.stationPrice(B) : 0);
-  return { path: Q, regions, secs, buySt, cost };
+  // 전철화비: 이 노선에서 (이미 산 + 이번에 살) 구간 km × km당 전철화비 (실제 공사와 같은 계산)
+  const elecCost = elec.map(l => {
+    const km = S.ownedKm(l) + secs.filter(sc => sc.line === l).reduce((x, sc) => x + sc.km, 0);
+    return { line: l, km, cost: Math.round(km * CFG.elecPerKm / 100_000) * 100_000 };
+  });
+  const cost = regions.reduce((x, rg) => x + CFG.unlockCost[rg], 0) + secs.reduce((x, sc) => x + S.sectionPrice(sc), 0) + (buySt ? S.stationPrice(B) : 0)
+    + elecCost.reduce((x, e) => x + e.cost, 0);
+  return { path: Q, regions, secs, buySt, elec: elecCost, cost };
 }
 // 왜 못 가는지: 전철화·고속선 레벨·선로 없음
 function whyNoLink(a, b, kind) {
@@ -852,13 +870,15 @@ async function buyLink(plan, b) {
     ...plan.regions.map(rg => `· 🗺️ ${S.regionName[rg]} 지역 열기  ${won(CFG.unlockCost[rg])}`),
     ...plan.secs.map(sc => `· 🛤 ${sc.line.name} ${S.regionName[sc.region]} 구간 ${fmt(sc.km)}km  ${won(S.sectionPrice(sc))}`),
     ...(plan.buySt ? [`· 🏷 ${B.name}역  ${won(S.stationPrice(B))}`] : []),
+    ...(plan.elec || []).map(x => `· ⚡ ${x.line.name} 전철화 (산 구간 ${fmt(x.km)}km)  ${won(x.cost)}`),
   ];
   if (G.money < plan.cost) { toast(`돈이 부족합니다 (필요 ${won(plan.cost)}, 가진 돈 ${won(G.money)})`); return false; }
   if (!await ask(`${B.name}까지 이으려면 아래가 필요합니다.\n${lines.join('\n')}\n\n모두 ${won(plan.cost)}에 살까요?`, `${won(plan.cost)}에 사기`)) return false;
   for (const rg of plan.regions) if (!check(S.unlockRegion(rg))) return false;
   if (plan.buySt && !check(S.buyStation(B))) return false;
   if (plan.secs.length && !check(S.buySections(plan.secs))) return false;
-  toast(`${B.name}까지 이었습니다`, '#15803d');
+  for (const x of plan.elec || []) if (!check(S.upgradeLine(x.line, 'elec'))) return false;
+  toast(`${B.name}까지 이었습니다${(plan.elec || []).length ? ' (전철화 완료)' : ''}`, '#15803d');
   return true;
 }
 // 첫 역: 안 산 역이면 사고, 안 연 지역이면 지역도 함께
