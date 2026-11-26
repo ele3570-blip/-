@@ -582,6 +582,29 @@ function hidePanelForMap() { if (openPanelName) { panelBeforeMap = openPanelName
 function restorePanel() { if (panelBeforeMap) { openPanel(panelBeforeMap); panelBeforeMap = null; } }
 
 const foldedKinds = new Set(); // 노선 목록에서 접은 열차 종류
+const foldedDepot = new Set();  // 차량기지에서 접은 열차 종류
+// 열차 종류 전체(대기 + 운행 중) 등급 올리기 버튼. 운행 중 열차가 전철화 때문에 못 올라가면 건너뜀
+function kindTargets(k, L) { return [...G.depot, ...G.trains].filter(t => t.kind === k && t.lvl < L); }
+function kindUpCost(k, L) {
+  const lv = CFG.kinds[k].levels; let n = 0, c = 0, skip = 0;
+  for (const t of kindTargets(k, L)) {
+    if (G.trains.includes(t) && S.needsElec(k, L) && S.routeHasNonElec(t.route)) { skip++; continue; }
+    n++; for (let x = t.lvl + 1; x <= L; x++) c += lv[x].upgrade;
+  }
+  return { n, c, skip };
+}
+function kindUpHtml(k) {
+  const K = CFG.kinds[k], all = [...G.depot, ...G.trains].filter(t => t.kind === k);
+  if (!all.length) return '';
+  const minLv = Math.min(...all.map(t => t.lvl)), out = [];
+  for (let L = minLv + 1; L < K.levels.length; L++) {
+    const need = S.needTrain(k, L), name = K.levels[L].name;
+    if (lvLocked(need)) { out.push(`<button disabled>${lockTag(need)} 모두 ${name}</button>`); break; }
+    const { n, c, skip } = kindUpCost(k, L); if (!n && !skip) continue;
+    out.push(`<button data-kindup="${k}:${L}" ${!n || G.money < c ? 'disabled' : ''}>⬆ 모두 ${name} <span class="muted">${n}대 · ${won(c)}${skip ? ` · 비전철 노선 ${skip}대 제외` : ''}</span></button>`);
+  }
+  return out.length ? `<div class="btns" style="display:flex;flex-wrap:wrap;gap:4px;margin:6px 0">${out.join('')}</div>` : '';
+}
 function renderRoutes() {
   $('newRouteBtns').innerHTML = Object.entries(CFG.kinds).map(([k, K]) => { const need = S.needTrain(k, 0);
     return `<button data-newroute="${k}" ${lvLocked(need) ? 'disabled' : ''}>${lvLocked(need) ? lockTag(need) : K.icon} 새 ${K.name}<br><span class="muted">${k === 'general' ? '일반선' : k === 'metro' ? '전철화 선로' : S.level() < CFG.gate.hs ? `전철화 선로(고속선 Lv${CFG.gate.hs})` : '고속선·전철화 선로'}</span></button>`; }).join('');
@@ -611,7 +634,7 @@ function renderDepot() {
   }).join('');
   $('buyTrain').innerHTML = Object.entries(CFG.kinds).map(([k, K]) => { const need = S.needTrain(k, 0); return `<button data-buy="${k}" ${G.money < K.price || lvLocked(need) ? 'disabled' : ''}>${lvLocked(need) ? lockTag(need) : K.icon} ${K.levels[0].name}<br><b>${won(K.price)}</b><br><span class="muted">${K.levels[0].cap}명 · ${K.levels[0].vmax}km/h</span></button>`; }).join('');
   const r = G.routes.find(x => x.no === depotRouteNo);
-  $('depot').innerHTML = (G.depot.length ? '' : '<p class="muted">차량기지가 비어 있습니다.</p>') + G.depot.map(t => {
+  const waitCard = t => {
     const L = CFG.kinds[t.kind].levels, nx = L[t.lvl + 1], tier = S.tierOf(t);
     const err = r ? S.canDispatch(t, r) : '노선을 먼저 고르세요';
     return `<div class="bus"><b>${trainLabel(t)}</b> <span class="muted">Lv${t.lvl + 1} · ${tier.cap}명 · ${tier.vmax}km/h${tier.elec || CFG.kinds[t.kind].elec ? ' · 전철화 선로만' : ''}</span>
@@ -620,13 +643,22 @@ function renderDepot() {
         ${nx ? upBtn(t) : ''}
         <button data-sell="${t.id}">매각 ${won(S.sellValue(t))}</button>
       </div></div>`;
-  }).join('');
-  const running = G.trains.slice().sort((a, b) => a.route.no - b.route.no);
-  if (running.length) $('depot').innerHTML += `<h3>운행 중 (${running.length}대)</h3>` + running.map(t => {
-    const tier = S.tierOf(t);
+  };
+  const runCard = t => { const tier = S.tierOf(t);
     return `<div class="bus">${trainLabel(t)} <span class="muted">· ${esc(S.routeTitle(t.route))} · Lv${t.lvl + 1} · ${tier.cap}명 · ${tier.vmax}km/h</span>
-      <div class="btns">${upBtn(t)}<button data-recall="${t.id}">회수</button></div></div>`;
+      <div class="btns">${upBtn(t)}<button data-recall="${t.id}">회수</button></div></div>`; };
+  // 열차 종류별로 묶음: 머리줄(대수) + 종류 전체 등급 올리기 + 대기 열차 + 운행 중 열차
+  const html = Object.entries(CFG.kinds).map(([k, K]) => {
+    const wait = G.depot.filter(t => t.kind === k).sort((a, b) => a.no - b.no);
+    const run = G.trains.filter(t => t.kind === k).sort((a, b) => a.route.no - b.route.no || a.no - b.no);
+    if (!wait.length && !run.length) return '';
+    const shut = foldedDepot.has(k);
+    return `<div class="kindhead" data-dfold="${k}"><span>${shut ? '▸' : '▾'} ${K.icon} <b>${K.name}</b> <span class="muted">대기 ${wait.length} · 운행 ${run.length}</span></span></div>
+      ${shut ? '' : `${kindUpHtml(k)}
+      ${wait.length ? `<div class="wsub">차량기지 대기 (${wait.length}대)</div>${wait.map(waitCard).join('')}` : ''}
+      ${run.length ? `<div class="wsub">운행 중 (${run.length}대)</div>${run.map(runCard).join('')}` : ''}`}`;
   }).join('');
+  $('depot').innerHTML = html || '<p class="muted">열차가 없습니다. 위에서 사세요.</p>';
 }
 // 노선 열차 한꺼번에 등급 올리기: 목표 등급마다 버튼(몇 대 · 합계 비용). 레벨·전철화로 막히면 이유
 function upAllCost(r, L) {
@@ -1206,6 +1238,17 @@ document.addEventListener('click', e => {
   else if (d.selroute) { selected = { type: 'route', r: findR(d.selroute) }; renderInfo(); }
   else if (d.unlock) { const id = d.unlock; if (check(S.unlockRegion(id), `${S.regionName[id]}을(를) 열었습니다`)) fitStations(stations.filter(s => s.region === id || G.unlocked.has(s.region))); }
   else if (d.region && !e.target.closest('button')) fitStations(stations.filter(s => s.region === d.region));
+  else if (d.kindup) {
+    const [k, L] = [d.kindup.split(':')[0], +d.kindup.split(':')[1]];
+    let n = 0, skip = 0, err = null;
+    for (const t of kindTargets(k, L)) {
+      if (G.trains.includes(t) && S.needsElec(k, L) && S.routeHasNonElec(t.route)) { skip++; continue; }
+      while (t.lvl < L) { const res = S.upgradeTrain(t); if (res.err) { err = res.err; break; } }
+      if (err) break; n++;
+    }
+    if (err) toast(err); else toast(`${CFG.kinds[k].name} ${n}대를 ${CFG.kinds[k].levels[L].name}(으)로 올렸습니다${skip ? ` (비전철 노선 ${skip}대 제외)` : ''}`, '#15803d');
+    refreshAll();
+  }
   else if (d.upall) {
     const [no, L] = d.upall.split(':').map(Number), r = findR(no);
     let n = 0, err = null;
@@ -1231,6 +1274,10 @@ document.addEventListener('click', e => {
   else if (d.repay) { const r = S.repay(d.repay === 'max' ? Infinity : +d.repay); check(r, r.amount ? `${won(r.amount)}을 갚았습니다` : ''); }
   else if (d.newgame) { showHome(); renderSlots('new'); }
   else if (d.lup) { const [id, what] = d.lup.split(':'); check(S.upgradeLine(lines.find(l => l.id === id), what), '공사를 마쳤습니다'); }
+});
+$('depot').addEventListener('click', e => {
+  const h = e.target.closest('[data-dfold]'); if (!h) return;
+  const k = h.dataset.dfold; foldedDepot.has(k) ? foldedDepot.delete(k) : foldedDepot.add(k); renderDepot();
 });
 $('routes').addEventListener('click', e => {
   const h = e.target.closest('[data-fold]'); if (!h) return;

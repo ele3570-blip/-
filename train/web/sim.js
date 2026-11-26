@@ -52,22 +52,27 @@ const CFG = {
   dayStartMin: 5 * 60, dayEndMin: 24 * 60,
   // 회사 레벨: 누적 운임 수입으로 오르고, 레벨마다 열차·지역·공사가 풀림
   levels: [
-    { need: 0,             desc: '무궁화호 · 광역전철 4량 · 대구권과 이웃 지역(경북·경남·부산·울산)' },
-    { need: 100_000_000,   desc: 'ITX-새마을 · 전철화 공사' },
-    { need: 400_000_000,   desc: '광역전철 6량 · 복선화 공사 · 충청·충북 지역' },
-    { need: 1_300_000_000, desc: 'KTX-이음(전철화된 일반선만)' },
-    { need: 4_500_000_000, desc: '고속선 구간 구입 · KTX-산천 · 수도권 지역' },
-    { need: 15_000_000_000, desc: 'ITX-마음 · 광역전철 8량 · 고속화 공사 · 강원·전북·광주전남 지역' },
-    { need: 40_000_000_000, desc: 'KTX-청룡' },
+    { need: 0,                desc: '무궁화호 · 광역전철 4량 · 대구권·경북 동해안·경북 북부·경남 지역' },
+    { need: 150_000_000,      desc: '부산·울산 지역 · ITX-새마을' },
+    { need: 400_000_000,      desc: '전철화 공사' },
+    { need: 1_000_000_000,    desc: '광역전철 6량 · 복선화 공사 · 충북 지역' },
+    { need: 2_500_000_000,    desc: '대전·충남·세종 지역' },
+    { need: 5_000_000_000,    desc: 'KTX-이음(전철화된 일반선만)' },
+    { need: 10_000_000_000,   desc: '고속선 구간 구입 · KTX-산천' },
+    { need: 20_000_000_000,   desc: '수도권 지역' },
+    { need: 40_000_000_000,   desc: 'ITX-마음 · 고속화 공사 · 강원 지역' },
+    { need: 70_000_000_000,   desc: '광역전철 8량 · 전북 지역' },
+    { need: 120_000_000_000,  desc: '광주·전남 지역' },
+    { need: 200_000_000_000,  desc: 'KTX-청룡' },
   ],
   // 필요한 레벨(1부터). 열차는 '종류:등급'
   gate: {
-    train: { 'general:0': 1, 'general:1': 2, 'general:2': 6, 'metro:0': 1, 'metro:1': 3, 'metro:2': 6, 'ktx:0': 4, 'ktx:1': 5, 'ktx:2': 7 },
-    region: { daegu: 1, gyeongbuk_e: 1, gyeongbuk_n: 1, gyeongnam: 1, busan: 1, chungcheong: 3, chungbuk: 3, capital: 5, gangwon: 6, jeonbuk: 6, jeonnam: 6 },
-    work: { elec: 2, dbl: 3, speed: 6 },
-    hs: 5,
+    train: { 'general:0': 1, 'general:1': 2, 'general:2': 9, 'metro:0': 1, 'metro:1': 4, 'metro:2': 10, 'ktx:0': 6, 'ktx:1': 7, 'ktx:2': 12 },
+    region: { daegu: 1, gyeongbuk_e: 1, gyeongbuk_n: 1, gyeongnam: 1, busan: 2, chungbuk: 4, chungcheong: 5, capital: 8, gangwon: 9, jeonbuk: 10, jeonnam: 11 },
+    work: { elec: 3, dbl: 4, speed: 9 },
+    hs: 7,
   },
-  loanLevelMul: [0.5, 0.7, 1, 1.2, 1.5, 1.8, 2], // 대출 한도 × 레벨 배율
+  loanLevelMul: [0.5, 0.6, 0.7, 0.85, 1, 1.15, 1.3, 1.5, 1.7, 1.9, 2.1, 2.3], // 대출 한도 × 레벨 배율
   startDate: [2026, 1, 1], // 1일째 = 2026년 1월 1일. 실제 달력(달마다 28~31일), 달이 끝나면 월 결산
   // 은행 대출. 한도 = (기본 + 자산 × 비율) × 등급 배율, 이자는 하루 결산 때 남은 빚 × 하루 이자율
   loan: {
