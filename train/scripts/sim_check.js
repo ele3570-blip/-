@@ -3,7 +3,7 @@
 //   예) node train/scripts/sim_check.js 3 동대구,구미
 //       node train/scripts/sim_check.js 5 +gyeongnam +busan general:동대구,밀양,부산 ktx:동대구,울산,부산*2
 //   종류 생략 = general. 필요한 역·구간은 자동으로 사고, 첫 일반열차는 차량기지의 무궁화호를 씀
-//   loan=40000000 → 그 시점에 대출. MONEY=1e9 처럼 시작 자금을 바꿀 수 있음
+//   loan=40000000 → 그 시점에 대출. MONEY=1e9 처럼 시작 자금, REV=5e8 처럼 누적 수입(회사 레벨)을 바꿀 수 있음
 const fs = require('fs'), vm = require('vm'), path = require('path');
 const ctx = { console, Math, JSON, Map, Set, Object, Array, Number, Infinity }; ctx.globalThis = ctx; vm.createContext(ctx);
 for (const f of ['data.js', 'sim.js']) vm.runInContext(fs.readFileSync(path.join(__dirname, '..', 'web', f), 'utf8').replace('window.GAME_DATA', 'globalThis.GAME_DATA'), ctx);
@@ -11,6 +11,7 @@ const S = ctx.SIM, G = S.G;
 const [days = '3', ...plan] = process.argv.slice(2);
 S.setupNewGame();
 if (process.env.MONEY) G.money = +process.env.MONEY;
+if (process.env.REV) G.totalRev = +process.env.REV; // 누적 수입(레벨) 미리 채우기
 const m = x => (x / 1e4).toFixed(0) + '만';
 console.log(`시작 자금 ${m(G.money)}`);
 for (const a of plan) {

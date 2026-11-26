@@ -125,7 +125,12 @@
     #topbar #peak, #topbar .stat:has(#clock) span.lbl { display: none; }
     #topbar .spacer { display: none; }
     #topbar .stat:has(#sat) { display: none; }
+    #topbar .stat { font-size: 0; }               /* 폰: 📅🕐💰 같은 앞 아이콘 글자를 숨겨 자리 확보 */
     #topbar .stat b { font-size: 13px; }
+    #topbar #debt::before { content: '빚 '; font-weight: 400; }
+    #topbar #debt { color: #b91c1c; }
+    #homeBtn { padding: 4px 6px; }
+    #lvBtn { padding: 3px 6px; } .lvbar { width: 34px; }
     #topbar #todayStat, #topbar .stat.wide { display: none; }
     #topbar button { padding: 4px 6px; font-size: 12px; }
     #dock { width: auto; max-width: none; left: 8px; right: 8px; bottom: 8px; transform: none; padding: 4px; gap: 2px; justify-content: space-between; }
@@ -152,6 +157,9 @@
   #legend i.dash { background: repeating-linear-gradient(90deg, #a16207 0 5px, transparent 5px 8px); }
   @media (max-width: 640px) { #legend { top: auto; bottom: 74px; left: 8px; right: 8px; font-size: 11px; } #legend .lgrow { gap: 6px; } }
   #homeBtn { padding: 4px 8px; flex: none; }
+  #lvBtn { flex: none; display: inline-flex; flex-direction: column; align-items: stretch; gap: 2px; padding: 3px 8px; font-size: 12px; line-height: 1.1; }
+  .lvbar { display: block; width: 44px; height: 4px; background: #e5e7eb; border-radius: 2px; overflow: hidden; }
+  .lvbar i { display: block; height: 100%; width: 0; background: linear-gradient(90deg, #f59e0b, #ef4444); }
   #home { position: fixed; inset: 0; z-index: 4; display: flex; align-items: center; justify-content: center; padding: 16px;
     background: linear-gradient(160deg, rgba(219,234,254,.96), rgba(253,226,228,.96)); overflow-y: auto; }
   #home[hidden] { display: none; }
@@ -171,6 +179,7 @@
 <div id="app">
   <div id="topbar">
     <button id="homeBtn" title="홈 (저장하고 나가기)">🏠</button>
+    <button id="lvBtn" title="회사 레벨 (누적 운임 수입)"><b id="lvTxt">Lv1</b><span class="lvbar"><i id="lvBar"></i></span></button>
     <span class="stat">📅 <b id="day">2026년 1월 1일 (목)</b></span>
     <span class="stat">🕐 <b id="clock">05:00</b></span>
     <span class="stat">💰 <b id="money">0</b></span>

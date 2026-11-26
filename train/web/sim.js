@@ -50,6 +50,24 @@ const CFG = {
   repStart: 1.0, repMin: 0.6, repMax: 1.4, repSpeed: 0.35,
   psoMinSat: 60, psoRatio: 0.5,    // 공익서비스 보상: 적자라도 만족도가 높으면 적자의 50%
   dayStartMin: 5 * 60, dayEndMin: 24 * 60,
+  // 회사 레벨: 누적 운임 수입으로 오르고, 레벨마다 열차·지역·공사가 풀림
+  levels: [
+    { need: 0,             desc: '무궁화호 · 광역전철 4량 · 대구권과 이웃 지역(경북·경남·부산·울산)' },
+    { need: 100_000_000,   desc: 'ITX-새마을 · 전철화 공사' },
+    { need: 400_000_000,   desc: '광역전철 6량 · 복선화 공사 · 충청·충북 지역' },
+    { need: 1_300_000_000, desc: 'KTX-이음(전철화된 일반선만)' },
+    { need: 4_500_000_000, desc: '고속선 구간 구입 · KTX-산천 · 수도권 지역' },
+    { need: 15_000_000_000, desc: 'ITX-마음 · 광역전철 8량 · 고속화 공사 · 강원·전북·광주전남 지역' },
+    { need: 40_000_000_000, desc: 'KTX-청룡' },
+  ],
+  // 필요한 레벨(1부터). 열차는 '종류:등급'
+  gate: {
+    train: { 'general:0': 1, 'general:1': 2, 'general:2': 6, 'metro:0': 1, 'metro:1': 3, 'metro:2': 6, 'ktx:0': 4, 'ktx:1': 5, 'ktx:2': 7 },
+    region: { daegu: 1, gyeongbuk_e: 1, gyeongbuk_n: 1, gyeongnam: 1, busan: 1, chungcheong: 3, chungbuk: 3, capital: 5, gangwon: 6, jeonbuk: 6, jeonnam: 6 },
+    work: { elec: 2, dbl: 3, speed: 6 },
+    hs: 5,
+  },
+  loanLevelMul: [0.5, 0.7, 1, 1.2, 1.5, 1.8, 2], // 대출 한도 × 레벨 배율
   startDate: [2026, 1, 1], // 1일째 = 2026년 1월 1일. 실제 달력(달마다 28~31일), 달이 끝나면 월 결산
   // 은행 대출. 한도 = (기본 + 자산 × 비율) × 등급 배율, 이자는 하루 결산 때 남은 빚 × 하루 이자율
   loan: {
@@ -138,9 +156,16 @@ const freshState = () => ({
   waiting: new Map(),    // stationId → [passenger]
   today: null, rep: CFG.repStart, history: [],
   debt: 0, negDays: 0, over: false, // 빚, 자금이 마이너스로 끝난 날 수, 파산
+  totalRev: 0, shownLevel: 1, // 누적 운임 수입(레벨), 화면에서 알린 레벨
   mon: null, // 이번 달 누계(월 결산)
 });
 const G = freshState();
+// 회사 레벨
+function levelOf(rev = G.totalRev) { let lv = 1; CFG.levels.forEach((x, i) => { if (rev >= x.need) lv = i + 1; }); return lv; }
+const level = () => levelOf();
+const levelNeed = lv => CFG.levels[lv - 1]?.need;
+const needTrain = (kind, lvl) => CFG.gate.train[`${kind}:${lvl}`] || 1;
+const lvErr = need => level() < need ? `회사 레벨 ${need}부터 할 수 있습니다 (지금 Lv${level()})` : null;
 function newToday() { return { interest: 0, pax: 0, transfers: 0, revenue: 0, cost: 0, potential: 0, spawned: 0, satSum: 0, satN: 0, gaveUp: 0, leftBehind: 0, trainKm: 0, bought: 0 }; }
 G.today = newToday();
 // 달력: 실제 달력. day 1 = CFG.startDate
@@ -174,6 +199,7 @@ const needsElec = (kind, lvl) => !!(CFG.kinds[kind].elec || CFG.kinds[kind].leve
 function edgeAllowed(e, kind, lvl = 0) {
   const K = CFG.kinds[kind];
   if (!K.tracks.includes(e.line.kind)) return false;
+  if (e.line.kind === 'hs' && level() < CFG.gate.hs && !edgeOwned(e)) return false;
   if (needsElec(kind, lvl) && !lineElec(e.line)) return false;
   return true;
 }
@@ -461,7 +487,7 @@ function arrive(t) {
         left.push(p); continue;
       }
       const fare = fareFor(tier, rideKm(r, t.i, j));
-      G.money += fare; G.today.revenue += fare; r.revToday = (r.revToday || 0) + fare;
+      G.money += fare; G.today.revenue += fare; G.totalRev += fare; r.revToday = (r.revToday || 0) + fare;
       if (!p.paid) { p.paid = true; recordSat(G.t - p.start, tier.comfort); }
       { const st = rs(r); st.board++; st.waitSum += G.t - p.since; }
       t.pax.push({ dest: p.dest, j, next: opt.x != null ? opt.r2 : null, start: p.start });
@@ -628,6 +654,7 @@ function trainValue(t) { const K = CFG.kinds[t.kind]; let v = K.price; for (let 
 const sellValue = t => Math.round(trainValue(t) * CFG.sellRatio);
 function buyTrain(kind, free = false) {
   const K = CFG.kinds[kind];
+  if (!free) { const e = lvErr(needTrain(kind, 0)); if (e) return { err: `${K.levels[0].name}: ${e}` }; }
   if (!free) { if (G.money < K.price) return { err: '돈이 부족합니다' }; G.money -= K.price; G.today.bought += K.price; }
   const t = { id: G.nextTrainId++, kind, lvl: 0 };
   G.depot.push(t);
@@ -637,6 +664,7 @@ function buyTrain(kind, free = false) {
 function upgradeBlock(t) {
   const L = CFG.kinds[t.kind].levels;
   if (t.lvl + 1 >= L.length) return '최고 등급입니다';
+  { const e = lvErr(needTrain(t.kind, t.lvl + 1)); if (e) return `${L[t.lvl + 1].name}: ${e}`; }
   if (G.trains.includes(t) && needsElec(t.kind, t.lvl + 1) && routeHasNonElec(t.route))
     return `${L[t.lvl + 1].name}은(는) 전철화된 선로만 다닙니다. 노선에 비전철 구간이 있어 운행 중에는 올릴 수 없습니다`;
   return null;
@@ -714,6 +742,7 @@ const secOwned = sec => G.ownedSecs.has(sec.id);
 function buySection(sec, free = false) {
   if (secOwned(sec)) return { err: '이미 산 구간입니다' };
   if (!G.unlocked.has(sec.region)) return { err: '아직 열지 않은 지역입니다' };
+  if (!free && sec.line.kind === 'hs') { const e = lvErr(CFG.gate.hs); if (e) return { err: `고속선: ${e}` }; }
   const c = free ? 0 : sectionPrice(sec);
   if (G.money < c) return { err: '돈이 부족합니다' };
   G.money -= c; G.today.bought += c; G.ownedSecs.add(sec.id);
@@ -730,6 +759,7 @@ function missingSections(path) {
 function buySections(list) {
   const total = list.reduce((a, sc) => a + sectionPrice(sc), 0);
   if (list.some(sc => !G.unlocked.has(sc.region))) return { err: '아직 열지 않은 지역을 지나야 합니다' };
+  if (list.some(sc => sc.line.kind === 'hs')) { const e = lvErr(CFG.gate.hs); if (e) return { err: `고속선: ${e}` }; }
   if (G.money < total) return { err: '돈이 부족합니다' };
   for (const sc of list) { G.money -= sectionPrice(sc); G.today.bought += sectionPrice(sc); G.ownedSecs.add(sc.id); }
   for (const r of G.routes) r.legs = buildLegs(r.kind, r.stops) || r.legs;
@@ -758,7 +788,8 @@ function creditGrade() {
 }
 function loanLimit() {
   const L = CFG.loan;
-  return Math.floor((L.base + assetValue() * L.assetRatio) * L.grades[creditGrade()].limitMul / 1_000_000) * 1_000_000;
+  const lvMul = CFG.loanLevelMul[level() - 1] ?? 1;
+  return Math.floor((L.base + assetValue() * L.assetRatio) * L.grades[creditGrade()].limitMul * lvMul / 1_000_000) * 1_000_000;
 }
 const canBorrow = () => Math.max(0, loanLimit() - G.debt);
 function borrow(amount) {
@@ -778,6 +809,7 @@ function repay(amount) {
 function unlockRegion(id) {
   const c = CFG.unlockCost[id];
   if (G.unlocked.has(id)) return { err: '이미 열린 지역입니다' };
+  { const e = lvErr(CFG.gate.region[id] || 1); if (e) return { err: e }; }
   if (G.money < c) return { err: '돈이 부족합니다' };
   G.money -= c; G.today.bought += c; G.unlocked.add(id);
   rebuildNetwork();
@@ -805,6 +837,7 @@ function upgradeCost(l, what) {
 function upgradeLine(l, what) {
   const c = upgradeCost(l, what);
   if (c == null) return { err: '할 수 없는 개량입니다' };
+  { const e = lvErr(CFG.gate.work[what] || 1); if (e) return { err: e }; }
   if (!ownedKm(l)) return { err: '산 구간이 없습니다' };
   if (G.money < c) return { err: '돈이 부족합니다' };
   G.money -= c; G.today.bought += c;
@@ -819,7 +852,7 @@ function upgradeLine(l, what) {
 const SAVE_KEY = 'korea-rail-save-v3'; // v3: 동대구역 + 무궁화 1대로 시작
 function serialize() {
   return JSON.stringify({
-    money: G.money, debt: G.debt, negDays: G.negDays, over: G.over, day: G.day, rep: G.rep, unlocked: [...G.unlocked], lineUp: G.lineUp, ownedSecs: [...G.ownedSecs], ownedSt: [...G.ownedSt],
+    money: G.money, totalRev: G.totalRev, shownLevel: G.shownLevel, debt: G.debt, negDays: G.negDays, over: G.over, day: G.day, rep: G.rep, unlocked: [...G.unlocked], lineUp: G.lineUp, ownedSecs: [...G.ownedSecs], ownedSt: [...G.ownedSt],
     nextRouteNo: G.nextRouteNo, nextTrainId: G.nextTrainId, history: G.history,
     mon: G.mon,
     routes: G.routes.map(r => ({ no: r.no, kind: r.kind, color: r.color, stops: r.stops, name: r.name, mon: r.mon })),
@@ -829,7 +862,9 @@ function serialize() {
 }
 function deserialize(s) {
   const o = JSON.parse(s);
-  Object.assign(G, { money: o.money, debt: o.debt || 0, negDays: o.negDays || 0, over: !!o.over, day: o.day, rep: o.rep, unlocked: new Set(o.unlocked), lineUp: o.lineUp || {},
+  // 누적 수입이 없는 예전 저장: 남아 있는 결산 기록으로 어림
+  const estRev = (o.history || []).reduce((a, h) => a + (h.revenue || 0), 0) + (o.mon?.revenue || 0);
+  Object.assign(G, { money: o.money, totalRev: o.totalRev ?? estRev, shownLevel: o.shownLevel ?? levelOf(o.totalRev ?? estRev), debt: o.debt || 0, negDays: o.negDays || 0, over: !!o.over, day: o.day, rep: o.rep, unlocked: new Set(o.unlocked), lineUp: o.lineUp || {},
     ownedSecs: new Set(o.ownedSecs || []), ownedSt: new Set(o.ownedSt || []),
     nextRouteNo: o.nextRouteNo, nextTrainId: o.nextTrainId, history: o.history || [], t: CFG.dayStartMin, today: newToday(), waiting: new Map() });
   G.mon = o.mon || newMonth();
@@ -859,7 +894,7 @@ function setupNewGame() {
   rebuildNetwork();
 }
 
-root.SIM = { CFG, D, G, resetGame, routeDiag, upgradeBlock, dateOf, isMonthEnd, monthReport, startMonth, assetValue, creditGrade, loanLimit, canBorrow, borrow, repay, stations, byName, lines, edges, adj, sections, secById, edgeOwned, stOwned, secOwned, stationPrice, buyStation,
+root.SIM = { CFG, D, G, level, levelOf, levelNeed, needTrain, lvErr, resetGame, routeDiag, upgradeBlock, dateOf, isMonthEnd, monthReport, startMonth, assetValue, creditGrade, loanLimit, canBorrow, borrow, repay, stations, byName, lines, edges, adj, sections, secById, edgeOwned, stOwned, secOwned, stationPrice, buyStation,
   sectionPrice, buySection, missingSections, buySections, ownedKm, regionName, toKm, distKm, isOpen, lineElec, lineDbl, lineVmax, edgeOpen, edgeCap,
   kindOf, tierOf, needsElec, edgeAllowed, findPath, buildLegs, addRoute, routeTitle, routeKm, routeHasNonElec, routeOpen, routeTrains,
   legMinutes, edgeSpeed, cycleMinutes, headway, rideMinutes, rideKm, rebuildNetwork, planFrom, hourShare, peakAt, tick, satPct, closeDay, startNextDay,

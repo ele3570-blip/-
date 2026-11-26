@@ -109,7 +109,10 @@ function pointInRings(x, y, rings) {
   });
 }
 function regionAt(px, py) { const x = wx(px), y = wy(py); return regionShapes.find(r => pointInRings(x, y, r.rings)) || null; }
-const canUnlock = id => !G.unlocked.has(id) && S.regionReachable(id);
+const regionLv = id => CFG.gate.region[id] || 1;
+const lvLocked = need => S.level() < need;
+const lockTag = need => `🔒 Lv${need}`;
+const canUnlock = id => !G.unlocked.has(id) && S.regionReachable(id) && !lvLocked(regionLv(id));
 
 // ───────────────────────── 노선 겹침: 구간마다 나란히 ─────────────────────────
 let edgeSlots = new Map(); // edgeId → [routeNo…]
@@ -252,8 +255,8 @@ function draw() {
       const title = open ? r.name : `🔒 ${r.name}`;
       ctx.strokeText(title, X, Y); ctx.fillStyle = open ? REGION_INK[r.id] || '#374151' : '#6b7280'; ctx.fillText(title, X, Y);
       if (!open) {
-        const c = CFG.unlockCost[r.id], reach = S.regionReachable(r.id), ok = reach && G.money >= c;
-        const t2 = `${won(c)}${reach ? (ok ? ' · 열 수 있음' : '') : ' · 이어진 지역 먼저'}`;
+        const need = regionLv(r.id), c = CFG.unlockCost[r.id], reach = S.regionReachable(r.id), ok = reach && G.money >= c && !lvLocked(need);
+        const t2 = lvLocked(need) ? `회사 레벨 ${need} 필요 · ${won(c)}` : `${won(c)}${reach ? (ok ? ' · 열 수 있음' : '') : ' · 이어진 지역 먼저'}`;
         ctx.font = '700 12px "Pretendard","Apple SD Gothic Neo","Noto Sans KR",sans-serif';
         const w = ctx.measureText(t2).width + 14;
         ctx.fillStyle = ok ? '#16a34a' : reach ? '#ffffff' : 'rgba(255,255,255,.8)';
@@ -499,11 +502,12 @@ function trackHtml(e) {
     else if (!open) {
       const c = CFG.unlockCost[sc.region], reach = S.regionReachable(sc.region);
       h += `<div style="margin-top:6px">아직 열지 않은 지역입니다.</div>
-        <div class="btns" style="display:flex;gap:4px;margin-top:6px"><button data-unlock="${sc.region}" ${!reach || G.money < c ? 'disabled' : ''}>🗺️ ${esc(S.regionName[sc.region])} 열기 ${won(c)}</button></div>`;
-    } else h += `<div class="btns" style="display:flex;gap:4px;margin-top:6px"><button class="primary" data-buysec="${sc.id}" ${G.money < price ? 'disabled' : ''}>🏷 이 구간 사기 ${won(price)}</button></div>`;
+        <div class="btns" style="display:flex;gap:4px;margin-top:6px"><button data-unlock="${sc.region}" ${!reach || G.money < c || lvLocked(regionLv(sc.region)) ? 'disabled' : ''}>${lvLocked(regionLv(sc.region)) ? lockTag(regionLv(sc.region)) + ' ' : '🗺️ '}${esc(S.regionName[sc.region])} 열기 ${won(c)}</button></div>`;
+    } else if (l.kind === 'hs' && lvLocked(CFG.gate.hs)) h += `<div class="btns" style="display:flex;gap:4px;margin-top:6px"><button disabled>${lockTag(CFG.gate.hs)} 고속선 구간 ${won(price)}</button></div><div class="muted" style="font-size:12px">고속선은 회사 레벨 ${CFG.gate.hs}부터 살 수 있습니다</div>`;
+    else h += `<div class="btns" style="display:flex;gap:4px;margin-top:6px"><button class="primary" data-buysec="${sc.id}" ${G.money < price ? 'disabled' : ''}>🏷 이 구간 사기 ${won(price)}</button></div>`;
     h += '</div>';
   }
-  const btn = (what, label) => { const c = S.upgradeCost(l, what); return c == null ? '' : `<button data-lup="${l.id}:${what}" ${G.money < c ? 'disabled' : ''}>${label} ${won(c)}</button>`; };
+  const btn = (what, label) => { const c = S.upgradeCost(l, what), need = CFG.gate.work[what]; return c == null ? '' : lvLocked(need) ? `<button disabled>${lockTag(need)} ${label}</button>` : `<button data-lup="${l.id}:${what}" ${G.money < c ? 'disabled' : ''}>${label} ${won(c)}</button>`; };
   if (S.ownedKm(l) > 0) {
     const load = S.edgeLoad.get(e.id) || 0;
     h += `<div style="margin-top:6px">이 구간 열차 시간당 ${load.toFixed(1)}대 / 용량 ${S.edgeCap(e)}대 ${load > S.edgeCap(e) ? '<span class="tag warn">초과 → 감속</span>' : ''}</div>
@@ -523,7 +527,8 @@ function regionHtml(id) {
     <div class="muted">역 ${ss.length}개${open ? ` (보유 ${owned})` : ''} · 실제 하루 승차 ${fmt(on)}명</div>
     <div class="muted">지나는 선로: ${ls.map(esc).join(', ')}</div>`;
   if (!open) h += `<div class="btns" style="display:flex;gap:6px;align-items:center;margin-top:8px">
-      <button class="primary" data-unlock="${id}" ${!reach || G.money < c ? 'disabled' : ''}>🗺️ 지역 열기 ${won(c)}</button>
+      <button class="primary" data-unlock="${id}" ${!reach || G.money < c || lvLocked(regionLv(id)) ? 'disabled' : ''}>${lvLocked(regionLv(id)) ? lockTag(regionLv(id)) : '🗺️'} 지역 열기 ${won(c)}</button>
+      ${lvLocked(regionLv(id)) ? `<span class="muted">회사 레벨 ${regionLv(id)}부터</span>` : ''}
       ${reach ? '' : '<span class="muted">열린 지역과 선로로 이어져야 합니다</span>'}</div>
       <div class="muted" style="margin-top:4px">연 뒤에 쓸 역과 선로 구간을 따로 삽니다</div>`;
   h += `<div class="wbox"><div class="wsub">큰 역</div>${ss.slice(0, 6).map(s => `<div class="wrow"><span class="wlab">${esc(s.name)}${open && !S.stOwned(s) ? ` <span class="muted">${won(S.stationPrice(s))}</span>` : ''}</span><span class="wbar"><i style="width:${s.on / ss[0].on * 100}%;background:${REGION_INK[id] || '#6366f1'}"></i></span><span class="wnum">${fmt(s.on)}명</span></div>`).join('')}</div>`;
@@ -558,8 +563,8 @@ function hidePanelForMap() { if (openPanelName) { panelBeforeMap = openPanelName
 function restorePanel() { if (panelBeforeMap) { openPanel(panelBeforeMap); panelBeforeMap = null; } }
 
 function renderRoutes() {
-  $('newRouteBtns').innerHTML = Object.entries(CFG.kinds).map(([k, K]) =>
-    `<button data-newroute="${k}">${K.icon} 새 ${K.name}<br><span class="muted">${k === 'general' ? '일반선' : k === 'metro' ? '전철화 선로' : '고속선·전철화 선로'}</span></button>`).join('');
+  $('newRouteBtns').innerHTML = Object.entries(CFG.kinds).map(([k, K]) => { const need = S.needTrain(k, 0);
+    return `<button data-newroute="${k}" ${lvLocked(need) ? 'disabled' : ''}>${lvLocked(need) ? lockTag(need) : K.icon} 새 ${K.name}<br><span class="muted">${k === 'general' ? '일반선' : k === 'metro' ? '전철화 선로' : S.level() < CFG.gate.hs ? `전철화 선로(고속선 Lv${CFG.gate.hs})` : '고속선·전철화 선로'}</span></button>`; }).join('');
   $('routes').innerHTML = G.routes.map(r => {
     const ts = S.routeTrains(r), p = (r.revToday || 0) - (r.costToday || 0);
     return `<div class="route" data-route="${r.no}"><span class="sw" style="background:${r.color}"></span>
@@ -571,8 +576,7 @@ let depotRouteNo = null;
 function renderDepot() {
   const sel = $('depotRoute');
   sel.innerHTML = '<option value="">(노선 선택)</option>' + G.routes.map(r => `<option value="${r.no}" ${r.no === depotRouteNo ? 'selected' : ''}>${kindIcon(r.kind)} ${esc(S.routeTitle(r))}</option>`).join('');
-  $('buyTrain').innerHTML = Object.entries(CFG.kinds).map(([k, K]) =>
-    `<button data-buy="${k}" ${G.money < K.price ? 'disabled' : ''}>${K.icon} ${K.levels[0].name}<br><b>${won(K.price)}</b><br><span class="muted">${K.levels[0].cap}명 · ${K.levels[0].vmax}km/h</span></button>`).join('');
+  $('buyTrain').innerHTML = Object.entries(CFG.kinds).map(([k, K]) => { const need = S.needTrain(k, 0); return `<button data-buy="${k}" ${G.money < K.price || lvLocked(need) ? 'disabled' : ''}>${lvLocked(need) ? lockTag(need) : K.icon} ${K.levels[0].name}<br><b>${won(K.price)}</b><br><span class="muted">${K.levels[0].cap}명 · ${K.levels[0].vmax}km/h</span></button>`; }).join('');
   const r = G.routes.find(x => x.no === depotRouteNo);
   $('depot').innerHTML = (G.depot.length ? '' : '<p class="muted">차량기지가 비어 있습니다.</p>') + G.depot.map(t => {
     const L = CFG.kinds[t.kind].levels, nx = L[t.lvl + 1], tier = S.tierOf(t);
@@ -595,6 +599,8 @@ function renderDepot() {
 function upBtn(t) {
   const nx = CFG.kinds[t.kind].levels[t.lvl + 1];
   if (!nx) return '<span class="muted" style="font-size:12px;align-self:center">최고 등급</span>';
+  const need = S.needTrain(t.kind, t.lvl + 1);
+  if (lvLocked(need)) return `<button disabled>${lockTag(need)} ${nx.name}</button>`;
   const why = S.upgradeBlock(t);
   return `<button data-up="${t.id}" ${why || G.money < nx.upgrade ? 'disabled' : ''} title="${esc(why || '')}">⬆ ${nx.name} (${won(nx.upgrade)})</button>${why ? `<span class="muted" style="font-size:11px;flex-basis:100%">${esc(why)}</span>` : ''}`;
 }
@@ -603,7 +609,7 @@ function renderRegions() {
     const ss = stations.filter(s => s.region === rg.id), on = ss.reduce((a, s) => a + s.on, 0);
     const open = G.unlocked.has(rg.id), c = CFG.unlockCost[rg.id], reach = S.regionReachable(rg.id);
     return `<div class="gu ${open ? 'open' : ''}" data-region="${rg.id}"><span><b>${esc(rg.name)}</b><br><span class="muted">역 ${ss.length}개 · 하루 승차 ${fmt(on)}명</span></span>
-      ${open ? '<span class="tag ok">개방</span>' : `<button data-unlock="${rg.id}" ${!reach || G.money < c ? 'disabled' : ''} title="${reach ? '' : '열린 지역과 선로로 이어져야 합니다'}">${won(c)}</button>`}</div>`;
+      ${open ? '<span class="tag ok">개방</span>' : lvLocked(regionLv(rg.id)) ? `<button disabled>${lockTag(regionLv(rg.id))} · ${won(c)}</button>` : `<button data-unlock="${rg.id}" ${!reach || G.money < c ? 'disabled' : ''} title="${reach ? '' : '열린 지역과 선로로 이어져야 합니다'}">${won(c)}</button>`}</div>`;
   }).join('');
 }
 function renderTracks() {
@@ -612,9 +618,10 @@ function renderTracks() {
   $('tracks').innerHTML = ls.map(l => {
     let maxLoad = 0; for (const e of l.edges) maxLoad = Math.max(maxLoad, (S.edgeLoad.get(e.id) || 0) / S.edgeCap(e));
     const own = S.ownedKm(l) > 0;
-    const btn = (what, label) => { const c = S.upgradeCost(l, what); return !own || c == null ? '' : `<button data-lup="${l.id}:${what}" ${G.money < c ? 'disabled' : ''}>${label} ${won(c)}</button>`; };
+    const btn = (what, label) => { const c = S.upgradeCost(l, what), need = CFG.gate.work[what]; return !own || c == null ? '' : lvLocked(need) ? `<button disabled>${lockTag(need)} ${label}</button>` : `<button data-lup="${l.id}:${what}" ${G.money < c ? 'disabled' : ''}>${label} ${won(c)}</button>`; };
     const secs = l.sections.filter(sc => G.unlocked.has(sc.region)).map(sc => S.secOwned(sc)
       ? `<span class="tag ok">${esc(S.regionName[sc.region])} ${fmt(sc.km)}km</span>`
+      : l.kind === 'hs' && lvLocked(CFG.gate.hs) ? `<button disabled>${lockTag(CFG.gate.hs)} ${esc(S.regionName[sc.region])} ${fmt(sc.km)}km</button>`
       : `<button data-buysec="${sc.id}" ${G.money < S.sectionPrice(sc) ? 'disabled' : ''}>🏷 ${esc(S.regionName[sc.region])} ${fmt(sc.km)}km ${won(S.sectionPrice(sc))}</button>`).join(' ');
     return `<div class="line"><b>${esc(l.name)}</b>
       <span class="tag ${l.kind === 'hs' ? '' : 'gray'}">${l.kind === 'hs' ? '고속선' : '일반선'}</span>
@@ -656,12 +663,13 @@ function renderBank() {
       <button data-repay="${step * 5}" ${!G.debt || G.money <= 0 ? 'disabled' : ''}>-${won(step * 5)}</button>
       <button data-repay="max" ${!G.debt || G.money <= 0 ? 'disabled' : ''}>${G.money >= G.debt ? '전부 갚기' : '가진 돈만큼'}</button>
     </div>
-    <div class="legend">· 한도 = (${won(L.base)} + 자산 × ${L.assetRatio * 100}%) × 등급 배율<br>
+    <div class="legend">· 한도 = (${won(L.base)} + 자산 × ${L.assetRatio * 100}%) × 등급 배율 × 회사 레벨 배율(지금 Lv${S.level()} ×${CFG.loanLevelMul[S.level() - 1]})<br>
       ${Object.entries(L.grades).map(([k, v]) => `· <b>${k}</b>: 하루 ${(v.rate * 100).toFixed(2)}% · 한도 ×${v.limitMul} — ${esc(v.desc)}`).join('<br>')}</div>`;
 }
 function renderHelp() {
   $('helpText').innerHTML = `
     · 드래그: 지도 이동 / 휠: 확대·축소 / Space: 일시정지<br>
+    · 🏢 회사 레벨: 누적 운임 수입으로 오릅니다. 레벨마다 열차 등급·지역·공사·고속선이 풀립니다(위쪽 Lv 배지를 누르면 표). KTX는 Lv${S.needTrain('ktx', 0)}, 고속선은 Lv${CFG.gate.hs}부터<br>
     · 확장 순서: 🗺️ 지역 열기 → 🔧 선로 구간 사기 → 역 사기 → 노선 만들기<br>
     &nbsp;&nbsp;노선을 그리다 안 산 역·구간을 누르면 바로 살 수 있습니다<br>
     · 점선 테두리 역 = 아직 안 산 역 / 흐린 선로 = 아직 안 산 구간. 선로를 누르면 그 구간을 사거나 개량할 수 있습니다<br>
@@ -710,7 +718,31 @@ function renderBadges() {
   row.innerHTML = STATION_TIERS.map(t => `<span title="하루 승차 ${t.min.toLocaleString()}명 이상">${svg(t)}${t.name.replace('역', '')}</span>`).join('');
   $('legend').appendChild(row);
 })();
+// 회사 레벨: 위쪽 배지(진행 막대), 누르면 레벨 표
+function levelHtml() {
+  const lv = S.level();
+  return `<h2 style="margin:0 0 4px">🏢 회사 레벨 ${lv}</h2>
+    <p class="muted" style="margin:0 0 10px">누적 운임 수입 ${won(G.totalRev)}${lv < CFG.levels.length ? ` · 다음 레벨까지 ${won(S.levelNeed(lv + 1) - G.totalRev)}` : ' · 최고 레벨'}</p>
+    <div style="max-height:60vh;overflow-y:auto">${CFG.levels.map((x, i) => `<div class="slot" style="opacity:${i + 1 <= lv ? 1 : .75}">
+      <b>${i + 1 <= lv ? '✅' : '🔒'} Lv${i + 1}</b> <span class="muted">누적 ${won(x.need)}</span><br><span style="font-size:13px">${esc(x.desc)}</span></div>`).join('')}</div>
+    <button class="primary" id="askNo" style="width:100%;margin-top:8px">닫기</button>`;
+}
+function showLevels() { showModal(levelHtml()); $('askNo').onclick = hideModal; }
+function checkLevelUp() {
+  const lv = S.level();
+  if (lv <= (G.shownLevel || 1) || $('modal').style.display === 'flex' || homeOpen()) return;
+  const gained = CFG.levels.slice(G.shownLevel, lv);
+  G.shownLevel = lv; save();
+  showModal(`<div style="text-align:center"><div style="font-size:48px">🎉</div><h2 style="margin:4px 0">회사 레벨 ${lv} 달성!</h2>
+    <p class="muted" style="margin:0 0 10px">누적 운임 수입 ${won(G.totalRev)}</p></div>
+    ${gained.map((x, i) => `<div class="slot"><b>새로 풀림 (Lv${G.shownLevel - gained.length + i + 1})</b><br>${esc(x.desc)}</div>`).join('')}
+    <button class="primary" id="askNo" style="width:100%;margin-top:8px">좋아요</button>`);
+  $('askNo').onclick = () => { hideModal(); refreshAll(); };
+}
 function renderTop() {
+  { const lv = S.level(), a = S.levelNeed(lv), b = S.levelNeed(lv + 1);
+    $('lvTxt').textContent = `Lv${lv}`;
+    $('lvBar').style.width = (b == null ? 100 : Math.min(100, (G.totalRev - a) / (b - a) * 100)) + '%'; }
   { const d = S.dateOf(); $('day').textContent = narrow.matches ? `${String(d.y).slice(2)}.${d.m}.${d.d}(${d.w})` : dateTxt(); }
   $('clock').textContent = hhmm(G.t);
   $('money').textContent = won(G.money);
@@ -1196,6 +1228,7 @@ function showHome() {
 }
 function hideHome() { $('home').hidden = true; }
 $('homeBtn').onclick = () => showHome();
+$('lvBtn').onclick = () => showLevels();
 document.addEventListener('click', e => {
   const b = e.target.closest('button'); if (!b) return;
   const d = b.dataset;
@@ -1268,7 +1301,7 @@ function frame(now) {
   draw();
   uiTimer += dtReal;
   // 카드·패널을 만지는 중(마우스를 올렸거나, 누른 지 2초 안)에는 다시 그리지 않음: 누르던 버튼이 바뀌어 눌림이 사라지지 않게
-  if (uiTimer > 0.3) { uiTimer = 0; renderTop(); if (selected && !busyEl($('infoCard'))) renderInfo(); if (openPanelName === 'routes' && !busyEl($('panel'))) renderRoutes(); }
+  if (uiTimer > 0.3) { uiTimer = 0; renderTop(); checkLevelUp(); if (selected && !busyEl($('infoCard'))) renderInfo(); if (openPanelName === 'routes' && !busyEl($('panel'))) renderRoutes(); }
   requestAnimationFrame(frame);
 }
 
