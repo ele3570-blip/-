@@ -370,6 +370,17 @@ function draw() {
     ctx.lineWidth = 3; ctx.strokeStyle = 'rgba(255,255,255,.9)'; ctx.strokeText(L.s.name, L.X, L.Y - L.rad - 3);
     ctx.fillStyle = L.open ? '#111827' : '#9ca3af'; ctx.fillText(L.s.name, L.X, L.Y - L.rad - 3);
   }
+  // 고른 노선(또는 그리는 중인 노선)의 정차 순서 번호
+  const numRoute = selected?.type === 'route' ? selected.r.stops : plan ? plan.stops : null;
+  if (numRoute) {
+    ctx.font = '800 11px sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    numRoute.forEach((id, i) => {
+      const st = stations[id], X = sx(st.x) - stationR(st) - 9, Y = sy(st.y) - stationR(st) - 4;
+      ctx.fillStyle = '#111827'; ctx.beginPath(); ctx.arc(X, Y, 8, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = '#fff'; ctx.fillText(String(i + 1), X, Y + 0.5);
+    });
+    ctx.textAlign = 'start'; ctx.textBaseline = 'alphabetic';
+  }
   // 기다리는 승객
   ctx.font = '700 11px sans-serif'; ctx.textBaseline = 'middle';
   for (const [sid, q] of G.waiting) {
@@ -431,10 +442,19 @@ function stationHtml(s) {
   }).join('')}</div>`;
   return h;
 }
+// 정차 순서: ① 정차역 → (사이에 지나치는 역은 작게 '통과') → ② 다음 정차역 …
+const circled = n => n <= 20 ? String.fromCharCode(0x2460 + n - 1) : `(${n})`;
 function routeStopsHtml(r) {
-  const stopSet = new Set(r.stops), seq = [r.stops[0]];
-  for (const leg of r.legs) seq.push(...leg.nodes.slice(1));
-  return `<div class="stops">${seq.map(id => `<span class="${stopSet.has(id) ? '' : 'pass'}">${esc(stations[id].name)}</span>`).join('')}</div>`;
+  let h = `<div class="wsub" style="margin-top:6px">정차 순서 (${r.stops.length}역)</div><div class="stopseq">`;
+  r.stops.forEach((id, i) => {
+    h += `<span class="stopno"><b>${circled(i + 1)}</b> ${esc(stations[id].name)}</span>`;
+    const leg = r.legs[i];
+    if (leg) {
+      const mid = leg.nodes.slice(1, -1).map(x => stations[x].name);
+      h += `<span class="stoparrow">→${mid.length ? ` <span class="muted">${esc(mid.join('·'))} 통과</span> →` : ''}</span>`;
+    }
+  });
+  return h + '</div>';
 }
 // 노선이 지나는 선로: 종류별 km 막대와 선로 순서(예: 경부선 전철 45km → 경부고속선 120km)
 // 노선 진단 상자: 열차가 더 필요한지
@@ -1264,7 +1284,7 @@ document.addEventListener('click', e => {
   }
   else if (d.panel) openPanel(openPanelName === d.panel ? null : d.panel);
   else if (d.newroute) startDrawing(d.newroute);
-  else if (d.route && !e.target.closest('button')) { const r = findR(d.route); selected = { type: 'route', r }; depotRouteNo = r.no; focusRoute(r); renderInfo(); }
+  else if (d.route && !e.target.closest('button')) { const r = findR(d.route); selected = { type: 'route', r }; depotRouteNo = r.no; if (narrow.matches) openPanel(null); focusRoute(r); renderInfo(); }
   else if (d.buy) { const res = S.buyTrain(d.buy); if (check(res, `${CFG.kinds[d.buy].levels[0].name}을(를) 샀습니다`)) refreshAll(); }
   else if (d.up) { const t = findT(d.up); check(S.upgradeTrain(t), `${S.tierOf(t).name}(으)로 올렸습니다`); }
   else if (d.sell) { const t = findT(d.sell); ask(`${trainLabel(t)}을(를) ${won(S.sellValue(t))}에 팔까요?`, '팔기').then(ok => { if (ok) { S.sellTrain(t); refreshAll(); } }); }
