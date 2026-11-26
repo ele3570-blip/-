@@ -548,7 +548,7 @@ function diagHtml(r) {
   if (x.rec != null) {
     const d = x.rec - x.n, K = CFG.kinds[r.kind];
     const free = G.depot.filter(t => t.kind === r.kind && !S.canDispatch(t, r)).length, buyN = Math.max(0, d - free);
-    rec = `<div style="margin-top:4px">🚆 추천 열차 수 <b>약 ${x.rec}대</b> <span class="muted">(지금 ${x.n}대${x.capped ? ` · 선로 용량 한계 ${x.nMax}대` : ''})</span></div>`;
+    rec = `<div style="margin-top:4px">🚆 추천 열차 수 <b>약 ${x.rec}대</b> <span class="muted">(${x.peakBand ? `가장 붐비는 ${x.peakBand} 시간대 기준 · ` : '하루 기준 · '}지금 ${x.n}대${x.capped ? ` · 선로 용량 한계 ${x.nMax}대` : ''})</span></div>`;
     if (d > 0) btn = `<button class="primary" data-setn="${r.no}:${x.rec}" style="margin-top:6px" ${buyN && G.money < buyN * K.price ? 'disabled' : ''}>＋ 추천대로 ${d}대 더 넣기${buyN ? ` (${buyN}대 구입 ${won(buyN * K.price)})` : ''}</button>`;
     else if (d < 0) btn = `<button data-setn="${r.no}:${x.rec}" style="margin-top:6px">－ 추천대로 ${-d}대 빼기 (차량기지로)</button>`;
   }
@@ -953,7 +953,7 @@ function setHint(t) { const h = $('hint'); h.innerHTML = t; h.style.display = t 
 let autoOrder = (() => { try { return localStorage.getItem('korea-rail-order') !== 'click'; } catch (e) { return true; } })();
 function drawHint() {
   const K = CFG.kinds[drawing.kind];
-  setHint(`${kindIcon(drawing.kind)} <b>새 ${K.name} 노선</b>: 정차할 역을 누르세요 ${autoOrder ? '(완료하면 짧은 순서로 정리)' : '(누른 순서대로)'}
+  setHint(`${kindIcon(drawing.kind)} <b>새 ${K.name} 노선</b>: 정차할 역을 누르세요(다시 누르면 빼기) ${autoOrder ? '(완료하면 짧은 순서로 정리)' : '(누른 순서대로)'}
     <div class="hintbtns"><button data-draw="order" title="역 순서 정하는 방법 바꾸기">${autoOrder ? '🔀 짧은 순서' : '👆 누른 순서'}</button><button data-draw="undo" title="Backspace">↩ 되돌리기</button><button data-draw="cancel" title="Esc">취소</button><button class="primary" data-draw="done" title="Enter">완료</button></div>`);
 }
 function startDrawing(kind) {
@@ -1106,7 +1106,14 @@ async function ensureFirst(s) {
 let busy = false; // 확인창을 기다리는 중에는 다른 클릭 무시
 async function drawClick(s) {
   const st = drawing.stops, kind = drawing.kind;
-  if (st.includes(s.id)) return toast('이미 넣은 역입니다');
+  const k = st.indexOf(s.id);
+  if (k >= 0) { // 넣은 역을 다시 누르면 빼기(앞뒤 역을 다시 이음)
+    st.splice(k, 1);
+    if (k === 0) drawing.legs.splice(0, 1);
+    else if (k === st.length) drawing.legs.splice(k - 1, 1);
+    else { const P = S.findPath(st[k - 1], st[k], kind); if (P) drawing.legs.splice(k - 1, 2, P); else { st.splice(k, 0, s.id); return toast('이 역을 빼면 앞뒤 역을 이을 수 없습니다'); } }
+    toast(`${s.name}역을 뺐습니다`, '#475569'); return;
+  }
   if (!st.length) { if (await ensureFirst(s) && drawing) st.push(s.id); return; }
   const a = st[st.length - 1], plan = planLink(a, s.id, kind);
   if (plan.err) return toast(plan.err);

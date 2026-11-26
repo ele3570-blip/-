@@ -687,14 +687,14 @@ function board(t) {
     }
     if (j == null || (j - t.i) * dir <= 0) { left.push(p); continue; }
     if (t.pax.length >= tier.cap) {
-      rs(r).full++;
-      if (!p.leftBehind) { p.leftBehind = true; G.today.leftBehind++; r.leftToday = (r.leftToday || 0) + 1; rs(r).leftU++; }
+      stat(r, st => st.full++);
+      if (!p.leftBehind) { p.leftBehind = true; G.today.leftBehind++; r.leftToday = (r.leftToday || 0) + 1; stat(r, st => st.leftU++); }
       left.push(p); continue;
     }
     const fare = fareFor(tier, rideKm(r, t.i, j));
     G.money += fare; G.today.revenue += fare; G.totalRev += fare; r.revToday = (r.revToday || 0) + fare;
     if (!p.paid) { p.paid = true; recordSat(G.t - p.start, tier.comfort); if (p.commute) G.today.commute++; }
-    { const st = rs(r); st.board++; st.waitSum += G.t - p.since; }
+    stat(r, st => { st.board++; st.waitSum += G.t - p.since; });
     t.pax.push({ dest: p.dest, j, next: x != null ? r2 : null, start: p.start, commute: p.commute });
     moved++;
   }
@@ -723,7 +723,7 @@ function stepTrains(dt) {
         let c = leg.km * tier.perKm;
         for (const e of leg.edges) if (e.line.kind === 'hs') c += e.km * CFG.hsTrackFeePerKm;
         G.money -= c; G.today.cost += c; G.today.trainKm += leg.km; t.route.costToday = (t.route.costToday || 0) + c;
-        const st = rs(t.route); st.seatKm += leg.km * tier.cap; st.paxKm += leg.km * t.pax.length; st.peakLoad = Math.max(st.peakLoad, t.pax.length / tier.cap);
+        stat(t.route, st => { st.seatKm += leg.km * tier.cap; st.paxKm += leg.km * t.pax.length; st.peakLoad = Math.max(st.peakLoad, t.pax.length / tier.cap); });
         t.i = j; t.dir = dir; t.legT = 0; t.legDur = null;
         arrive(t);
       }
@@ -738,7 +738,7 @@ function giveUps() {
     for (const p of q) {
       const limit = p.run ? p.run.dep + Math.max(CFG.tt.lateGrace, p.patience) : p.since + p.patience;
       if (G.t <= limit) { keep.push(p); continue; }
-      unbook(p.run); const r = p.run?.r || p.opts?.[0]?.r; if (r) rs(r).gave++;
+      unbook(p.run); const r = p.run?.r || p.opts?.[0]?.r; if (r) stat(r, st => st.gave++);
       G.today.gaveUp++; G.today.satN++;
     }
     G.waiting.set(sid, keep);
@@ -843,7 +843,7 @@ function startNextDay() {
   G.waiting = new Map(); spawnAcc.clear();
   G.pend = [];
   for (const t of G.trains) t.pax = [];
-  for (const r of G.routes) { r.yest = r.st; r.st = null; r.yestRev = r.revToday || 0; r.yestCost = r.costToday || 0; r.paxToday = 0; r.revToday = 0; r.costToday = 0; r.leftToday = 0; r.cancelToday = 0; r.lastDep = {}; }
+  for (const r of G.routes) { r.yest = r.st; r.st = null; r.yestB = r.stB; r.stB = null; r.yestRev = r.revToday || 0; r.yestCost = r.costToday || 0; r.paxToday = 0; r.revToday = 0; r.costToday = 0; r.leftToday = 0; r.cancelToday = 0; r.lastDep = {}; }
   layoutAll();
 }
 // 모든 노선 열차를 시간표 첫 편에 맞춰 종착역에 배치
@@ -851,7 +851,10 @@ function layoutAll() { for (const r of G.routes) { if (r.active && r.T) layoutRo
 
 // ───────────────────────── 노선 진단: 열차가 더 필요한가 ─────────────────────────
 // 노선 하루 기록: 좌석km·승객km(승차율), 탄 승객·대기 시간, 만석으로 못 탄 횟수, 기다리다 떠난 승객
-function rs(r) { return r.st || (r.st = { seatKm: 0, paxKm: 0, peakLoad: 0, board: 0, waitSum: 0, full: 0, gave: 0, leftU: 0 }); }
+const newSt = () => ({ seatKm: 0, paxKm: 0, peakLoad: 0, board: 0, waitSum: 0, full: 0, gave: 0, leftU: 0 });
+function rs(r) { return r.st || (r.st = newSt()); }
+// 하루 기록 + 시간대(새벽·출근·낮·퇴근·밤)별 기록. 추천 열차 수는 가장 붐비는 시간대 기준
+function stat(r, f) { f(rs(r)); const B = r.stB || (r.stB = {}), id = bandAt(G.t).id; f(B[id] || (B[id] = newSt())); }
 // 추천 열차 수: 이익이 가장 큰 대수
 //  타려던 사람 D = 탄 + 만석으로 놓친 + 기다리다 떠난. 자주 다닐수록 D가 늘어남(수요 식의 배차 배율)
 //  m대일 때 태울 수 있는 사람 = 지금 탄 사람 × (m/n) × (실제로 찰 수 있는 승차율 / 지금 승차율)
@@ -895,6 +898,18 @@ function routeDiag(r) {
   const dayFrac = useY ? 1 : Math.max(0.05, (G.t - CFG.dayStartMin) / (CFG.dayEndMin - CFG.dayStartMin));
   const rv = useY ? (r.yestRev || 0) : (r.revToday || 0), cs = (useY ? (r.yestCost || 0) : (r.costToday || 0)) + routeTrains(r).reduce((a, t) => a + tierOf(t).perDay, 0) * dayFrac;
   const base = { n, occ, wait, gaveRate, fullRate, st, hw, hw1, hwm, from: useY ? '어제' : '오늘', ...recommendTrains(r, n, occ, st, rv, cs) };
+  // 하루 중 가장 많이 필요한 시간대 기준(어제 하루 + 오늘 지금까지). 시간대마다 그 시간대 몫의 비용으로 이익이 가장 큰 대수
+  { const hasY = r.yest && r.yest.board >= 20; // 운임·하루 비용은 하루를 다 채운 어제 기록이 있으면 그것으로(아침 기록은 비용이 덜 잡힘)
+    const fare = hasY ? (r.yestRev || 0) / r.yest.board : rv / Math.max(1, st.board);
+    const dayCost = hasY ? (r.yestCost || 0) + routeTrains(r).reduce((a, t) => a + tierOf(t).perDay, 0) : cs / dayFrac, dayLen = CFG.dayEndMin - CFG.dayStartMin, cur = bandAt(G.t).id;
+    let peak = null;
+    for (const [B, isT] of [[r.yestB, false], [r.stB, true]]) if (B) for (const b of TT_BANDS) {
+      const x = B[b.id]; if (!x || x.board < (isT && b.id === cur ? 20 : 10)) continue;
+      const bl = Math.max(30, Math.min(b.to, CFG.dayEndMin) - Math.max(b.from, CFG.dayStartMin));
+      const o = recommendTrains(r, n, x.seatKm ? x.paxKm / x.seatKm : occ, x, fare * x.board, dayCost * bl / dayLen);
+      if (!peak || o.rec > peak.rec) peak = { ...o, band: b.name };
+    }
+    if (peak && peak.rec > base.rec) Object.assign(base, { rec: peak.rec, capped: peak.capped, peakBand: peak.band }); }
   // 판정은 추천 대수와 같은 방향으로: 추천이 지금보다 많으면 부족, 적으면 남음
   const { rec } = base, diff = rec - n, near = Math.abs(diff) <= Math.max(1, Math.round(n * 0.15));
   const lossy = base.recProfit < 0;
