@@ -14,10 +14,18 @@ const CFG = {
   // stopLoss = 정차 1번에 가감속으로 잃는 시간(분), perKm = 운행 1km 비용, perDay = 운행 중일 때 하루 고정비
   // fare = [최저 요금, km당 요금], upgrade = 아래 등급에서 올리는 비용, elec = 전철화된 선로만
   kinds: {
-    general: { name: '일반열차', icon: '🚃', price: 3_000_000, tracks: ['conv'], levels: [
-      { name: '무궁화호',   cap: 72, vmax: 150, stopLoss: 2.5, perKm: 180, perDay: 30_000, fare: [2_600, 66], comfort: 0,  upgrade: 0,         color: '#2563eb' },
-      { name: 'ITX-새마을', cap: 76, vmax: 150, stopLoss: 2.0, perKm: 210, perDay: 40_000, fare: [2_600, 98], comfort: 12, upgrade: 3_000_000, color: '#dc2626' },
-      { name: 'ITX-마음',   cap: 84, vmax: 150, stopLoss: 1.4, perKm: 160, perDay: 35_000, fare: [2_600, 98], comfort: 18, upgrade: 4_000_000, color: '#7c3aed', elec: true },
+    // 완행: 모든 역에 서는 옛 보통열차 계열. 싸고 느림. 비전철 선로 OK
+    local: { name: '완행열차', icon: '🚂', price: 1_500_000, tracks: ['conv'], levels: [
+      { name: '비둘기호', cap: 64, vmax: 120, stopLoss: 1.8, perKm: 80,  perDay: 12_000, fare: [1_500, 50], comfort: 0,  upgrade: 0,         color: '#64748b' },
+      { name: '통일호',   cap: 68, vmax: 135, stopLoss: 2.0, perKm: 120, perDay: 20_000, fare: [2_000, 58], comfort: 5,  upgrade: 1_500_000, color: '#b45309' },
+      { name: '무궁화호', cap: 72, vmax: 150, stopLoss: 2.5, perKm: 180, perDay: 30_000, fare: [2_600, 66], comfort: 10, upgrade: 2_500_000, color: '#2563eb' },
+    ] },
+    // 일반(특급): 새마을호(객차·비전철 OK) → 누리로부터는 전동차라 전철화 선로만
+    general: { name: '일반열차', icon: '🚆', price: 6_000_000, tracks: ['conv'], levels: [
+      { name: '새마을호',   cap: 64, vmax: 150, stopLoss: 2.2, perKm: 260, perDay: 45_000, fare: [3_200, 98], comfort: 15, upgrade: 0,         color: '#16a34a' },
+      { name: '누리로',     cap: 70, vmax: 150, stopLoss: 1.6, perKm: 220, perDay: 42_000, fare: [3_200, 98], comfort: 16, upgrade: 3_000_000, color: '#ea580c', elec: true },
+      { name: 'ITX-새마을', cap: 76, vmax: 150, stopLoss: 1.5, perKm: 200, perDay: 40_000, fare: [3_200, 98], comfort: 20, upgrade: 3_500_000, color: '#dc2626', elec: true },
+      { name: 'ITX-마음',   cap: 84, vmax: 150, stopLoss: 1.4, perKm: 160, perDay: 35_000, fare: [3_200, 98], comfort: 25, upgrade: 4_000_000, color: '#7c3aed', elec: true },
     ] },
     metro: { name: '광역열차', icon: '🚈', price: 2_500_000, tracks: ['conv'], elec: true, levels: [
       { name: '광역전철 4량', cap: 120, vmax: 120, stopLoss: 1.0, perKm: 150, perDay: 40_000, fare: [1_500, 40], comfort: 0, upgrade: 0,         color: '#0d9488' },
@@ -25,9 +33,11 @@ const CFG = {
       { name: '광역전철 8량', cap: 240, vmax: 120, stopLoss: 1.0, perKm: 270, perDay: 60_000, fare: [1_500, 40], comfort: 5, upgrade: 2_500_000, color: '#0369a1' },
     ] },
     ktx: { name: '고속열차', icon: '🚄', price: 40_000_000, tracks: ['hs', 'conv'], elec: true, levels: [
-      { name: 'KTX-이음', cap: 76,  vmax: 260, stopLoss: 3.0, perKm: 1_500, perDay: 600_000, fare: [8_400, 140], comfort: 25, upgrade: 0,          color: '#0f766e' },
-      { name: 'KTX-산천', cap: 80,  vmax: 300, stopLoss: 3.5, perKm: 1_700, perDay: 650_000, fare: [8_400, 150], comfort: 28, upgrade: 20_000_000,  color: '#1e3a8a' },
-      { name: 'KTX-청룡', cap: 104, vmax: 320, stopLoss: 3.2, perKm: 1_900, perDay: 700_000, fare: [8_400, 150], comfort: 35, upgrade: 30_000_000, color: '#be185d' },
+      { name: 'KTX',      cap: 72,  vmax: 300, stopLoss: 3.8, perKm: 1_800, perDay: 700_000, fare: [8_400, 145], comfort: 20, upgrade: 0,          color: '#334155' },
+      { name: 'KTX-산천', cap: 76,  vmax: 300, stopLoss: 3.3, perKm: 1_650, perDay: 650_000, fare: [8_400, 150], comfort: 27, upgrade: 15_000_000, color: '#1e3a8a' },
+      // 이음: 최고속도는 낮지만(260) 가감속이 빠르고 운행비가 싸서 정차가 많은 노선·일반선에서 유리
+      { name: 'KTX-이음', cap: 84,  vmax: 260, stopLoss: 2.0, perKm: 1_400, perDay: 560_000, fare: [8_400, 150], comfort: 32, upgrade: 20_000_000, color: '#0f766e' },
+      { name: 'KTX-청룡', cap: 104, vmax: 320, stopLoss: 2.4, perKm: 1_700, perDay: 650_000, fare: [8_400, 155], comfort: 38, upgrade: 30_000_000, color: '#be185d' },
     ] },
   },
   hsTrackFeePerKm: 300,         // 고속선 선로 사용료(열차 1km당)
@@ -52,14 +62,14 @@ const CFG = {
   dayStartMin: 5 * 60, dayEndMin: 24 * 60,
   // 회사 레벨: 누적 운임 수입으로 오르고, 레벨마다 열차·지역·공사가 풀림
   levels: [
-    { need: 0,                desc: '무궁화호 · 광역전철 4량 · 대구권·경북 동해안·경북 북부·경남 지역' },
-    { need: 150_000_000,      desc: '부산·울산 지역 · ITX-새마을' },
-    { need: 400_000_000,      desc: '전철화 공사' },
-    { need: 1_000_000_000,    desc: '광역전철 6량 · 복선화 공사 · 충북 지역' },
+    { need: 0,                desc: '비둘기호 · 광역전철 4량 · 대구권·경북 동해안·경북 북부·경남 지역' },
+    { need: 150_000_000,      desc: '부산·울산 지역 · 통일호' },
+    { need: 400_000_000,      desc: '전철화 공사 · 무궁화호 · 새마을호' },
+    { need: 1_000_000_000,    desc: '광역전철 6량 · 복선화 공사 · 충북 지역 · 누리로' },
     { need: 2_500_000_000,    desc: '대전·충남·세종 지역' },
-    { need: 5_000_000_000,    desc: 'KTX-이음(전철화된 일반선만)' },
+    { need: 5_000_000_000,    desc: 'KTX(전철화된 일반선만) · ITX-새마을' },
     { need: 10_000_000_000,   desc: '고속선 구간 구입 · KTX-산천' },
-    { need: 20_000_000_000,   desc: '수도권 지역' },
+    { need: 20_000_000_000,   desc: '수도권 지역 · KTX-이음' },
     { need: 40_000_000_000,   desc: 'ITX-마음 · 고속화 공사 · 강원 지역' },
     { need: 70_000_000_000,   desc: '광역전철 8량 · 전북 지역' },
     { need: 120_000_000_000,  desc: '광주·전남 지역' },
@@ -67,7 +77,8 @@ const CFG = {
   ],
   // 필요한 레벨(1부터). 열차는 '종류:등급'
   gate: {
-    train: { 'general:0': 1, 'general:1': 2, 'general:2': 9, 'metro:0': 1, 'metro:1': 4, 'metro:2': 10, 'ktx:0': 6, 'ktx:1': 7, 'ktx:2': 12 },
+    train: { 'local:0': 1, 'local:1': 2, 'local:2': 3, 'general:0': 3, 'general:1': 4, 'general:2': 6, 'general:3': 9,
+             'metro:0': 1, 'metro:1': 4, 'metro:2': 10, 'ktx:0': 6, 'ktx:1': 7, 'ktx:2': 8, 'ktx:3': 12 },
     region: { daegu: 1, gyeongbuk_e: 1, gyeongbuk_n: 1, gyeongnam: 1, busan: 2, chungbuk: 4, chungcheong: 5, capital: 8, gangwon: 9, jeonbuk: 10, jeonnam: 11 },
     work: { elec: 3, dbl: 4, speed: 9 },
     hs: 7,
@@ -104,7 +115,7 @@ const CFG = {
     { name: '광주–나주 광역철도', where: '광주–나주', state: '계획' },
   ],
   // 시작: 동대구역 + 경부선 대구권 구간 + 차량기지에 무궁화호 1대. 노선은 없음
-  starter: { stations: ['동대구'], sections: ['gyeongbu@daegu'], depot: ['general'] },
+  starter: { stations: ['동대구'], sections: ['gyeongbu@daegu'], depot: ['local'] }, // 시작: 동대구역 + 비둘기호 1대
 };
 const HOUR0 = 5;
 const hourSum = CFG.hourly.reduce((a, b) => a + b, 0);
@@ -898,7 +909,7 @@ function upgradeLine(l, what) {
 const SAVE_KEY = 'korea-rail-save-v3'; // v3: 동대구역 + 무궁화 1대로 시작
 function serialize() {
   return JSON.stringify({
-    money: G.money, totalRev: G.totalRev, shownLevel: G.shownLevel, debt: G.debt, negDays: G.negDays, over: G.over, day: G.day, rep: G.rep, unlocked: [...G.unlocked], lineUp: G.lineUp, ownedSecs: [...G.ownedSecs], ownedSt: [...G.ownedSt],
+    kindsVer: 2, money: G.money, totalRev: G.totalRev, shownLevel: G.shownLevel, debt: G.debt, negDays: G.negDays, over: G.over, day: G.day, rep: G.rep, unlocked: [...G.unlocked], lineUp: G.lineUp, ownedSecs: [...G.ownedSecs], ownedSt: [...G.ownedSt],
     nextRouteNo: G.nextRouteNo, nextTrainId: G.nextTrainId, history: G.history,
     mon: G.mon,
     routes: G.routes.map(r => ({ no: r.no, kind: r.kind, color: r.color, stops: r.stops, name: r.name, mon: r.mon })),
@@ -906,8 +917,23 @@ function serialize() {
     depot: G.depot.map(t => ({ id: t.id, no: t.no, kind: t.kind, lvl: t.lvl })),
   });
 }
+// 예전 열차 체계(일반: 무궁화·ITX-새마을·ITX-마음 / 고속: 이음·산천·청룡) → 지금 체계(완행·일반·고속 4단계)
+function migrateKinds(o) {
+  if (o.kindsVer >= 2) return;
+  const map = { general: [['local', 2], ['general', 2], ['general', 3]], ktx: [['ktx', 2], ['ktx', 1], ['ktx', 3]] };
+  const conv = t => { const m = map[t.kind]?.[t.lvl]; if (m && (m[0] !== t.kind || m[1] !== t.lvl)) { if (m[0] !== t.kind) delete t.no; t.kind = m[0]; t.lvl = m[1]; } };
+  o.trains.forEach(conv); o.depot.forEach(conv);
+  for (const r of o.routes) {
+    if (r.kind !== 'general') continue;
+    const ts = o.trains.filter(t => t.route === r.no);
+    if (ts.every(t => t.kind === 'local')) r.kind = 'local';                     // 무궁화만 다니던 노선 → 완행 노선
+    else for (const t of ts) if (t.kind !== r.kind) delete t.route;              // 섞여 있으면 종류가 다른 열차는 차량기지로
+  }
+  o.kindsVer = 2;
+}
 function deserialize(s) {
   const o = JSON.parse(s);
+  migrateKinds(o);
   // 누적 수입이 없는 예전 저장: 남아 있는 결산 기록으로 어림
   const estRev = (o.history || []).reduce((a, h) => a + (h.revenue || 0), 0) + (o.mon?.revenue || 0);
   Object.assign(G, { money: o.money, totalRev: o.totalRev ?? estRev, shownLevel: o.shownLevel ?? levelOf(o.totalRev ?? estRev), debt: o.debt || 0, negDays: o.negDays || 0, over: !!o.over, day: o.day, rep: o.rep, unlocked: new Set(o.unlocked), lineUp: o.lineUp || {},

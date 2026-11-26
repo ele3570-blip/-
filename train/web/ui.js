@@ -627,7 +627,7 @@ function kindUpHtml(k) {
 }
 function renderRoutes() {
   $('newRouteBtns').innerHTML = Object.entries(CFG.kinds).map(([k, K]) => { const need = S.needTrain(k, 0);
-    return `<button data-newroute="${k}" ${lvLocked(need) ? 'disabled' : ''}>${lvLocked(need) ? lockTag(need) : K.icon} 새 ${K.name}<br><span class="muted">${k === 'general' ? '일반선' : k === 'metro' ? '전철화 선로' : S.level() < CFG.gate.hs ? `전철화 선로(고속선 Lv${CFG.gate.hs})` : '고속선·전철화 선로'}</span></button>`; }).join('');
+    return `<button data-newroute="${k}" ${lvLocked(need) ? 'disabled' : ''}>${lvLocked(need) ? lockTag(need) : K.icon} 새 ${K.name}<br><span class="muted">${k === 'local' ? '일반선(모든 선로)' : k === 'general' ? '일반선(누리로부터 전철화)' : k === 'metro' ? '전철화 선로' : S.level() < CFG.gate.hs ? `전철화 선로(고속선 Lv${CFG.gate.hs})` : '고속선·전철화 선로'}</span></button>`; }).join('');
   // 열차 종류별로 묶음(일반 · 광역 · 고속). 머리줄을 누르면 접기/펴기
   const card = r => {
     const ts = S.routeTrains(r), p = (r.revToday || 0) - (r.costToday || 0);
@@ -780,10 +780,11 @@ function renderHelp() {
     · 새 노선: 종류 선택 → 정차할 역 클릭 → Enter(완료). 기본은 완료할 때 선로를 따라 가장 짧은 순서로 정리하고, 그리는 중 '🔀 짧은 순서' 버튼을 누르면 '👆 누른 순서' 그대로 씁니다<br>
     &nbsp;&nbsp;사이에 있는 역은 통과합니다(급행). Backspace: 마지막 역 취소 / Esc: 취소<br>
     · ✏️ 정차역 수정: 정차역 클릭 → 빼기, 다른 역 클릭 → 넣기, Enter 적용<br>
-    · 🚃 일반열차: 무궁화호 → ITX-새마을 → ITX-마음(전철화 선로만)<br>
+    · 🚂 완행열차: 비둘기호 → 통일호 → 무궁화호 (싸고 느림, 모든 선로)<br>
+    · 🚆 일반열차: 새마을호 → 누리로 → ITX-새마을 → ITX-마음 (누리로부터 전철화 선로만)<br>
     · 🚈 광역열차: 대경선 같은 지역 통근열차. 싸고 많이 타지만 요금이 낮음. 전철화 선로만<br>
-    · 🚄 고속열차: KTX-이음 → KTX-산천 → KTX-청룡. 고속선과 전철화된 일반선<br>
-    · 선로 색: 파랑 = 고속선(KTX만), 초록 = 전철 일반선, 갈색 점선 = 비전철 일반선(무궁화·새마을만). 노선을 누르면 지나는 선로 종류가 색 띠와 km로 나옵니다<br>
+    · 🚄 고속열차: KTX → KTX-산천 → KTX-이음(최고 260km/h지만 가감속 빠르고 운행비 쌈) → KTX-청룡. 고속선과 전철화된 일반선<br>
+    · 선로 색: 파랑 = 고속선(KTX만), 초록 = 전철 일반선, 갈색 점선 = 비전철 일반선(완행열차·새마을호만). 노선을 누르면 지나는 선로 종류가 색 띠와 km로 나옵니다<br>
     · 선로마다 시간당 다닐 수 있는 열차 수가 정해져 있습니다(단선 ${CFG.capSingle} · 복선 ${CFG.capDouble} · 고속선 ${CFG.capHs}). 넘치면 빨갛게 표시되고 느려집니다<br>
     · 역 모양 = 실제 하루 승차 인원(2025, 코레일): 점 간이역(200명 미만) · 동그라미 소형(200~) · 두 줄 동그라미 중형(1,000~) · 네모 대형(4,000~) · 두 줄 네모 초대형(12,000~). 게임 승객 1명 = 실제 ${Math.round(1 / CFG.demandScale)}명<br>
     · 역을 누르면 그 역 사람들이 가고 싶은 곳이 나옵니다. 아직 안 열린 지역으로 가려는 사람이 많으면 지역을 여세요<br>
@@ -925,7 +926,7 @@ function planLink(a, b, kind) {
   let elec = [];
   // 전철화가 필요한 열차(광역·KTX·ITX-마음)인데 비전철 선로 때문에 막히면: 일반열차 길로 잇고 그 선로를 전철화까지 함께 제안
   if (!Q && (CFG.kinds[kind].elec || kind === 'ktx')) {
-    const Qg = S.findPath(a, b, 'general', true) || S.findPath(a, b, 'general', 'all');
+    const Qg = S.findPath(a, b, 'local', true) || S.findPath(a, b, 'local', 'all');
     if (Qg && !(kind === 'ktx' && Qg.edges.some(e => e.line.kind === 'hs' && lvLocked(CFG.gate.hs)))) {
       elec = [...new Set(Qg.edges.filter(e => !S.lineElec(e.line)).map(e => e.line))];
       if (elec.length) {
@@ -953,9 +954,9 @@ function planLink(a, b, kind) {
 function whyNoLink(a, b, kind) {
   const K = CFG.kinds[kind];
   if (kind === 'ktx' && S.level() < CFG.gate.hs) {
-    if (S.findPath(a, b, 'general', 'all')) return `KTX는 회사 레벨 ${CFG.gate.hs} 전까지 고속선을 못 쓰고, 전철화된 일반선으로는 이 두 역이 이어지지 않습니다`;
+    if (S.findPath(a, b, 'local', 'all')) return `KTX는 회사 레벨 ${CFG.gate.hs} 전까지 고속선을 못 쓰고, 전철화된 일반선으로는 이 두 역이 이어지지 않습니다`;
   }
-  const G2 = S.findPath(a, b, 'general', 'all');
+  const G2 = S.findPath(a, b, 'local', 'all');
   if (G2 && (K.elec || kind === 'ktx')) {
     const bad = [...new Set(G2.edges.filter(e => !S.lineElec(e.line)).map(e => e.line.name))];
     if (bad.length) return `${josa(bad.join(', '), '이', '가')} 전철화되지 않아 ${josa(K.name, '이', '가')} 다닐 수 없습니다. 🔧 선로에서 전철화하거나 일반열차를 쓰세요`;
@@ -1468,8 +1469,8 @@ function loadSlot(n) {
 }
 function showIntro() {
   showModal(`<h2 style="margin:0 0 8px">🚄 새 게임</h2>
-    <p style="line-height:1.7"><b>동대구역</b> 하나와 차량기지의 <b>무궁화호 1대</b>로 시작합니다. 경부선 대구권 구간도 가지고 있습니다.</p>
-    <p style="line-height:1.7">첫 노선을 만들어 보세요. 🛤️ 노선 → 🚃 새 일반열차 → 동대구와 다른 역을 차례로 누르면, 아직 안 산 역은 그 자리에서 살 수 있습니다. 그다음 노선 카드에서 무궁화호를 배차합니다.</p>
+    <p style="line-height:1.7"><b>동대구역</b> 하나와 차량기지의 <b>비둘기호 1대</b>로 시작합니다. 경부선 대구권 구간도 가지고 있습니다.</p>
+    <p style="line-height:1.7">첫 노선을 만들어 보세요. 🛤️ 노선 → 🚂 새 완행열차 → 동대구와 다른 역을 차례로 누르면, 아직 안 산 역은 그 자리에서 살 수 있습니다. 그다음 노선 카드에서 비둘기호를 배차합니다.</p>
     <p style="line-height:1.7">역을 눌러 사람들이 어디로 가고 싶은지 보세요. 대구 사람들은 대부분 서울·부산으로 갑니다.</p>
     <p style="line-height:1.7">넓히는 순서: 🗺️ <b>지역 열기</b> → 🔧 <b>선로 구간 사기</b> → <b>역 사기</b> → 노선 만들기. 승객은 한 번까지 갈아탑니다.</p>
     <p class="muted">수요: 한국철도공사 역별 승하차(2025)를 하루 평균으로 나눈 값. 2026년 1월 1일부터 시작해 달이 끝날 때마다 결산하고, 진행은 하루 단위로 ${curSlot}번 칸에 저장됩니다.</p>
@@ -1492,7 +1493,7 @@ function renderHome() {
   const cont = curSlot != null ? { n: curSlot, label: '계속하기' } : li ? { n: last, label: '이어하기' } : null;
   $('homeMain').innerHTML = `
     ${cont ? `<button class="primary homebtn" data-home="continue">▶ ${cont.label}<small>${cont.n}번 칸 · ${esc((slotInfo(cont.n) || {}).date || '')}</small></button>` : ''}
-    <button class="${cont ? '' : 'primary '}homebtn" data-home="new">＋ 새 게임<small>동대구역 · 무궁화호 1대 · 4,500만원</small></button>
+    <button class="${cont ? '' : 'primary '}homebtn" data-home="new">＋ 새 게임<small>동대구역 · 비둘기호 1대 · 4,500만원</small></button>
     <button class="homebtn" data-home="load">📂 불러오기<small>저장 칸 ${SLOTS}개 · 백업 복사·붙여넣기</small></button>`;
   $('homeMain').hidden = false; $('homeSlots').hidden = true;
 }

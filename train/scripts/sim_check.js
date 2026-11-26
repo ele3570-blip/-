@@ -2,7 +2,7 @@
 // 사용법: node train/scripts/sim_check.js <일수> [+지역…] [종류:역,역,…*대수 …]
 //   예) node train/scripts/sim_check.js 3 동대구,구미
 //       node train/scripts/sim_check.js 5 +gyeongnam +busan general:동대구,밀양,부산 ktx:동대구,울산,부산*2
-//   종류 생략 = general. 필요한 역·구간은 자동으로 사고, 첫 일반열차는 차량기지의 무궁화호를 씀
+//   종류 생략 = local(완행). 필요한 역·구간은 자동으로 사고, 첫 완행열차는 차량기지의 비둘기호를 씀
 //   loan=40000000 → 그 시점에 대출. MONEY=1e9 처럼 시작 자금, REV=5e8 처럼 누적 수입(회사 레벨)을 바꿀 수 있음
 const fs = require('fs'), vm = require('vm'), path = require('path');
 const ctx = { console, Math, JSON, Map, Set, Object, Array, Number, Infinity }; ctx.globalThis = ctx; vm.createContext(ctx);
@@ -17,7 +17,7 @@ console.log(`시작 자금 ${m(G.money)}`);
 for (const a of plan) {
   if (a.startsWith('loan=')) { const r = S.borrow(+a.slice(5)); console.log(`대출 ${m(r.amount || 0)} ${r.err || ''} (등급 ${S.creditGrade()}, 한도 ${m(S.loanLimit())})`); continue; }
   if (a.startsWith('+')) { const r = S.unlockRegion(a.slice(1)); console.log(`지역 ${a.slice(1)}: ${r.err || '개방'}`); continue; }
-  const [, kind = 'general', list, n = '1'] = a.match(/^(?:(\w+):)?([^*]+)(?:\*(\d+))?$/);
+  const [, kind = 'local', list, n = '1'] = a.match(/^(?:(\w+):)?([^*]+)(?:\*(\d+))?$/);
   const ids = list.split(',').map(s => { const st = S.byName.get(s); if (!st) throw new Error('역 없음: ' + s); return st.id; });
   for (const id of ids) { const r = S.buyStation(S.stations[id]); if (r.err && !r.err.startsWith('이미')) console.log(r.err); }
   for (let k = 0; k + 1 < ids.length; k++) { const P = S.findPath(ids[k], ids[k + 1], kind, true); if (P) { const r = S.buySections(S.missingSections(P)); if (r.err) console.log('구간', r.err); } }
