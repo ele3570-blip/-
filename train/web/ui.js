@@ -53,6 +53,8 @@ function ask(msg, yes = '확인') {
 }
 function check(res, okMsg) { if (res && res.err) { toast(res.err); return false; } if (okMsg) toast(okMsg, '#15803d'); refreshAll(); return true; }
 const kindIcon = k => CFG.kinds[k].icon;
+// 조사: 받침 있으면 a, 없으면 b (예: josa('경북선', '이', '가') → '경북선이')
+const josa = (w, a, b) => { const c = String(w).charCodeAt(String(w).length - 1) - 0xAC00; return w + (c >= 0 && c < 11172 && c % 28 ? a : b); };
 const trainLabel = t => `${kindIcon(t.kind)} ${t.id}호 ${S.tierOf(t).name}`;
 const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
 
@@ -326,7 +328,7 @@ function draw() {
       const a = drawing.stops[drawing.stops.length - 1];
       let P = S.findPath(a, hoverStation.id, drawing.kind);
       ctx.strokeStyle = '#2563eb';
-      if (!P) { P = S.findPath(a, hoverStation.id, drawing.kind, true); ctx.strokeStyle = '#f59e0b'; }
+      if (!P) { P = S.findPath(a, hoverStation.id, drawing.kind, true) || S.findPath(a, hoverStation.id, drawing.kind, 'all'); ctx.strokeStyle = '#f59e0b'; }
       if (P) for (const e of P.edges) strokePts(edgeScreen(e, 0));
     }
     ctx.setLineDash([]);
@@ -430,10 +432,16 @@ const DIAG_BG = { more: '#fef2f2', less: '#fefce8', low: '#fefce8', ok: '#f0fdf4
 function diagHtml(r) {
   const x = S.routeDiag(r);
   const nums = x.occ != null ? `<div class="muted" style="font-size:12px;margin-top:3px">${x.from} 기준 · 승차율 ${Math.round(x.occ * 100)}% · 평균 대기 ${Math.round(x.wait)}분 · 기다리다 떠남 ${Math.round(x.gaveRate * 100)}% · 만석 ${Math.round(x.fullRate * 100)}%</div>` : '';
-  const btn = x.level === 'more' ? `<button class="primary" data-${G.depot.some(t => t.kind === r.kind) ? 'add' : 'buyadd'}="${r.no}" style="margin-top:6px">＋ 1대 더 넣기</button>`
-    : x.level === 'less' ? `<button data-recall="${S.routeTrains(r).slice(-1)[0].id}" style="margin-top:6px">－ 1대 빼기</button>` : '';
+  let rec = '', btn = '';
+  if (x.rec != null) {
+    const d = x.rec - x.n, K = CFG.kinds[r.kind];
+    const free = G.depot.filter(t => t.kind === r.kind && !S.canDispatch(t, r)).length, buyN = Math.max(0, d - free);
+    rec = `<div style="margin-top:4px">🚆 추천 열차 수 <b>약 ${x.rec}대</b> <span class="muted">(지금 ${x.n}대${x.capped ? ` · 선로 용량 한계 ${x.nMax}대` : ''})</span></div>`;
+    if (d > 0) btn = `<button class="primary" data-setn="${r.no}:${x.rec}" style="margin-top:6px" ${buyN && G.money < buyN * K.price ? 'disabled' : ''}>＋ 추천대로 ${d}대 더 넣기${buyN ? ` (${buyN}대 구입 ${won(buyN * K.price)})` : ''}</button>`;
+    else if (d < 0) btn = `<button data-setn="${r.no}:${x.rec}" style="margin-top:6px">－ 추천대로 ${-d}대 빼기 (차량기지로)</button>`;
+  }
   return `<div style="background:${DIAG_BG[x.level]};border:1px solid var(--line);border-radius:8px;padding:7px 9px;margin:6px 0">
-    <b>${x.icon} ${x.label}</b> <span style="font-size:12px">${esc(x.advice)}</span>${nums}${btn}</div>`;
+    <b>${x.icon} ${x.label}</b> <span style="font-size:12px">${esc(x.advice)}</span>${rec}${nums}${btn}</div>`;
 }
 function trackTags(r) {
   const has = new Set(); for (const leg of r.legs) for (const e of leg.edges) has.add(trackType(e));
@@ -789,28 +797,74 @@ async function ensureStation(s) {
   if (!await ask(`${s.name}역은 아직 사지 않았습니다.\n${won(c)}에 사서 정차역으로 넣을까요?`, `${won(c)}에 사기`)) return false;
   return check(S.buyStation(s), `${s.name}역을 샀습니다`);
 }
-// a → b 길: 산 선로로 안 이어지면 필요한 구간을 사겠냐고 물음
-async function pathOrBuy(a, b, kind) {
-  let P = S.findPath(a, b, kind);
-  if (P) return P;
-  const Q = S.findPath(a, b, kind, true);
-  if (!Q) { toast(`${CFG.kinds[kind].name}이(가) 다닐 수 있는 선로로 이어지지 않습니다 (열린 지역·전철화 확인)`); return null; }
-  const need = S.missingSections(Q), total = need.reduce((x, sc) => x + S.sectionPrice(sc), 0);
-  if (!await ask(`이 구간 선로를 아직 사지 않았습니다.\n${need.map(sc => `· ${sc.line.name} ${S.regionName[sc.region]} 구간 ${fmt(sc.km)}km  ${won(S.sectionPrice(sc))}`).join('\n')}\n\n모두 ${won(total)}에 살까요?`, `${won(total)}에 사기`)) return null;
-  if (!check(S.buySections(need), '선로 구간을 샀습니다')) return null;
-  return S.findPath(a, b, kind);
+// a → b 를 잇는 데 필요한 것: 열어야 할 지역(지나는 순서대로), 사야 할 선로 구간, 도착역
+function planLink(a, b, kind) {
+  const B = stations[b];
+  const P = S.findPath(a, b, kind);
+  if (P && S.stOwned(b)) return { path: P, cost: 0, regions: [], secs: [], buySt: false };
+  const Q = P || S.findPath(a, b, kind, true) || S.findPath(a, b, kind, 'all');
+  if (!Q) return { err: whyNoLink(a, b, kind) };
+  const regions = [];
+  for (const id of Q.nodes) { const rg = stations[id].region; if (!G.unlocked.has(rg) && !regions.includes(rg)) regions.push(rg); }
+  for (const rg of regions) if (lvLocked(regionLv(rg))) return { err: `${S.regionName[rg]} 지역을 지나야 하는데, 이 지역은 회사 레벨 ${regionLv(rg)}부터 열 수 있습니다` };
+  const secs = S.missingSections(Q);
+  const buySt = !S.stOwned(B);
+  const cost = regions.reduce((x, rg) => x + CFG.unlockCost[rg], 0) + secs.reduce((x, sc) => x + S.sectionPrice(sc), 0) + (buySt ? S.stationPrice(B) : 0);
+  return { path: Q, regions, secs, buySt, cost };
+}
+// 왜 못 가는지: 전철화·고속선 레벨·선로 없음
+function whyNoLink(a, b, kind) {
+  const K = CFG.kinds[kind];
+  if (kind === 'ktx' && S.level() < CFG.gate.hs) {
+    if (S.findPath(a, b, 'general', 'all')) return `KTX는 회사 레벨 ${CFG.gate.hs} 전까지 고속선을 못 쓰고, 전철화된 일반선으로는 이 두 역이 이어지지 않습니다`;
+  }
+  const G2 = S.findPath(a, b, 'general', 'all');
+  if (G2 && (K.elec || kind === 'ktx')) {
+    const bad = [...new Set(G2.edges.filter(e => !S.lineElec(e.line)).map(e => e.line.name))];
+    if (bad.length) return `${josa(bad.join(', '), '이', '가')} 전철화되지 않아 ${josa(K.name, '이', '가')} 다닐 수 없습니다. 🔧 선로에서 전철화하거나 일반열차를 쓰세요`;
+  }
+  return `${josa(K.name, '이', '가')} 다닐 수 있는 선로로 두 역이 이어지지 않습니다`;
+}
+async function buyLink(plan, b) {
+  const B = stations[b];
+  if (!plan.cost) return true;
+  const lines = [
+    ...plan.regions.map(rg => `· 🗺️ ${S.regionName[rg]} 지역 열기  ${won(CFG.unlockCost[rg])}`),
+    ...plan.secs.map(sc => `· 🛤 ${sc.line.name} ${S.regionName[sc.region]} 구간 ${fmt(sc.km)}km  ${won(S.sectionPrice(sc))}`),
+    ...(plan.buySt ? [`· 🏷 ${B.name}역  ${won(S.stationPrice(B))}`] : []),
+  ];
+  if (G.money < plan.cost) { toast(`돈이 부족합니다 (필요 ${won(plan.cost)}, 가진 돈 ${won(G.money)})`); return false; }
+  if (!await ask(`${B.name}까지 이으려면 아래가 필요합니다.\n${lines.join('\n')}\n\n모두 ${won(plan.cost)}에 살까요?`, `${won(plan.cost)}에 사기`)) return false;
+  for (const rg of plan.regions) if (!check(S.unlockRegion(rg))) return false;
+  if (plan.buySt && !check(S.buyStation(B))) return false;
+  if (plan.secs.length && !check(S.buySections(plan.secs))) return false;
+  toast(`${B.name}까지 이었습니다`, '#15803d');
+  return true;
+}
+// 첫 역: 안 산 역이면 사고, 안 연 지역이면 지역도 함께
+async function ensureFirst(s) {
+  if (S.stOwned(s)) return true;
+  if (!S.isOpen(s)) {
+    const rg = s.region, c = CFG.unlockCost[rg] + S.stationPrice(s);
+    if (lvLocked(regionLv(rg))) { toast(`${S.regionName[rg]} 지역은 회사 레벨 ${regionLv(rg)}부터 열 수 있습니다`); return false; }
+    if (!S.regionReachable(rg)) { toast(`${S.regionName[rg]} 지역은 아직 열린 지역과 이어지지 않습니다. 가까운 역부터 고르세요`); return false; }
+    if (G.money < c) { toast(`돈이 부족합니다 (필요 ${won(c)})`); return false; }
+    if (!await ask(`${s.name}역은 아직 안 연 ${S.regionName[rg]} 지역입니다.\n· 🗺️ 지역 열기 ${won(CFG.unlockCost[rg])}\n· 🏷 ${s.name}역 ${won(S.stationPrice(s))}\n\n모두 ${won(c)}에 살까요?`, `${won(c)}에 사기`)) return false;
+    if (!check(S.unlockRegion(rg))) return false;
+  }
+  return ensureStation(s);
 }
 let busy = false; // 확인창을 기다리는 중에는 다른 클릭 무시
 async function drawClick(s) {
-  const st = drawing.stops;
+  const st = drawing.stops, kind = drawing.kind;
   if (st.includes(s.id)) return toast('이미 넣은 역입니다');
-  if (!await ensureStation(s) || !drawing) return;
-  if (st.length) {
-    const P = await pathOrBuy(st[st.length - 1], s.id, drawing.kind);
-    if (!P || !drawing) return;
-    drawing.legs.push(P);
-  }
-  st.push(s.id);
+  if (!st.length) { if (await ensureFirst(s) && drawing) st.push(s.id); return; }
+  const a = st[st.length - 1], plan = planLink(a, s.id, kind);
+  if (plan.err) return toast(plan.err);
+  if (!await buyLink(plan, s.id) || !drawing) return;
+  const P = S.findPath(a, s.id, kind);
+  if (!P) return toast('이을 수 없습니다');
+  drawing.legs.push(P); st.push(s.id);
 }
 function finishDrawing() {
   if (!drawing) return;
@@ -989,9 +1043,8 @@ cv.addEventListener('pointermove', e => {
       const s = hoverStation, q = (G.waiting.get(s.id) || []).length;
       txt = `<b>${esc(s.name)}</b> · 실제 하루 ${fmt(s.on)}명 승차${q ? ` · 대기 ${q}명` : ''}${!S.isOpen(s) ? ' · 미개방' : S.stOwned(s) ? '' : ` · 미보유 ${won(S.stationPrice(s))}`}`;
       if (drawing && drawing.stops.length) {
-        const a = drawing.stops[drawing.stops.length - 1], P = S.findPath(a, s.id, drawing.kind);
-        const Q = P ? null : S.findPath(a, s.id, drawing.kind, true);
-        txt += P ? ` · +${fmt(P.km)}km` : Q ? ` · <span class="neg">선로 구간 구입 필요 ${won(S.missingSections(Q).reduce((x, sc) => x + S.sectionPrice(sc), 0))}</span>` : ' · <span class="neg">연결 안 됨</span>';
+        const pl = planLink(drawing.stops[drawing.stops.length - 1], s.id, drawing.kind);
+        txt += pl.err ? ' · <span class="neg">연결 안 됨</span>' : `${pl.path ? ` · +${fmt(pl.path.km)}km` : ''}${pl.cost ? ` · <span class="neg">${pl.regions.length ? '지역·' : ''}구입 필요 ${won(pl.cost)}</span>` : ''}`;
       }
     } else {
       const t = hoverTrain; txt = `${trainLabel(t)} · ${t.pax.length}/${S.tierOf(t).cap}명`;
@@ -1065,6 +1118,18 @@ document.addEventListener('click', e => {
   else if (d.selroute) { selected = { type: 'route', r: findR(d.selroute) }; renderInfo(); }
   else if (d.unlock) { const id = d.unlock; if (check(S.unlockRegion(id), `${S.regionName[id]}을(를) 열었습니다`)) fitStations(stations.filter(s => s.region === id || G.unlocked.has(s.region))); }
   else if (d.region && !e.target.closest('button')) fitStations(stations.filter(s => s.region === d.region));
+  else if (d.setn) {
+    const [no, want] = d.setn.split(':').map(Number), r = findR(no);
+    let ts = S.routeTrains(r), added = 0, bought = 0;
+    while (ts.length > want) { S.recall(ts[ts.length - 1]); ts = S.routeTrains(r); }
+    while (ts.length < want) {
+      let t = G.depot.find(x => x.kind === r.kind && !S.canDispatch(x, r));
+      if (!t) { const res = S.buyTrain(r.kind); if (res.err) { toast(res.err); break; } t = res.t; bought++; }
+      if (S.dispatch(t, r).err) break;
+      added++; ts = S.routeTrains(r);
+    }
+    toast(`${S.routeTitle(r)}: 열차 ${ts.length}대${bought ? ` (${bought}대 새로 삼)` : ''}`, '#15803d'); refreshAll();
+  }
   else if (d.buyst) { const st = stations[+d.buyst]; check(S.buyStation(st), `${st.name}역을 샀습니다`); }
   else if (d.buysec) { const sc = S.secById.get(d.buysec); check(S.buySection(sc), `${sc.line.name} ${S.regionName[sc.region]} 구간을 샀습니다`); }
   else if (d.borrow) { const r = S.borrow(d.borrow === 'max' ? Infinity : +d.borrow); check(r, r.amount ? `${won(r.amount)}을 빌렸습니다` : ''); }

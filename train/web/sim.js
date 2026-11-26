@@ -206,7 +206,7 @@ function edgeAllowed(e, kind, lvl = 0) {
 
 // ───────────────────────── 경로 찾기 ─────────────────────────
 // 열차 종류가 다닐 수 있는 선로로 가장 빠른 길. 반환: { nodes:[역…], edges:[엣지…], km }
-// any = 아직 안 산 구간도 지나감(살 구간을 알려 줄 때)
+// any = true: 아직 안 산 구간도 지나감(살 구간을 알려 줄 때) / 'all': 안 연 지역까지 지나감(열어야 할 지역을 알려 줄 때)
 function findPath(from, to, kind, any = false) {
   if (from === to) return null;
   const v = CFG.kinds[kind].levels[CFG.kinds[kind].levels.length - 1].vmax;
@@ -218,7 +218,7 @@ function findPath(from, to, kind, any = false) {
     if (done.has(u)) continue; done.add(u);
     if (u === to) break;
     for (const e of adj[u]) {
-      if (!edgeOpen(e) || !edgeAllowed(e, kind) || (!any && !edgeOwned(e))) continue;
+      if ((any !== 'all' && !edgeOpen(e)) || !edgeAllowed(e, kind) || (!any && !edgeOwned(e))) continue;
       const w = e.a === u ? e.b : e.a;
       const nd = d + e.km / edgeSpeed(e, v) + 0.02; // 역을 지날 때 작은 벌점: 같은 시간이면 역이 적은 길
       if (nd < (dist.get(w) ?? Infinity)) { dist.set(w, nd); prev.set(w, e); heap.push([nd, w]); }
@@ -483,7 +483,7 @@ function arrive(t) {
       if (!opt) { left.push(p); continue; }
       if (t.pax.length >= tier.cap) {
         rs(r).full++;
-        if (!p.leftBehind) { p.leftBehind = true; G.today.leftBehind++; r.leftToday = (r.leftToday || 0) + 1; }
+        if (!p.leftBehind) { p.leftBehind = true; G.today.leftBehind++; r.leftToday = (r.leftToday || 0) + 1; rs(r).leftU++; }
         left.push(p); continue;
       }
       const fare = fareFor(tier, rideKm(r, t.i, j));
@@ -621,12 +621,37 @@ function startNextDay() {
   G.day++; G.t = CFG.dayStartMin; G.today = newToday();
   G.waiting = new Map(); spawnAcc.clear();
   for (const t of G.trains) t.pax = [];
-  for (const r of G.routes) { r.paxToday = 0; r.revToday = 0; r.costToday = 0; r.leftToday = 0; r.lastDep = {}; r.yest = r.st; r.st = null; }
+  for (const r of G.routes) { r.yest = r.st; r.st = null; r.yestRev = r.revToday || 0; r.yestCost = r.costToday || 0; r.paxToday = 0; r.revToday = 0; r.costToday = 0; r.leftToday = 0; r.lastDep = {}; }
 }
 
 // ───────────────────────── 노선 진단: 열차가 더 필요한가 ─────────────────────────
 // 노선 하루 기록: 좌석km·승객km(승차율), 탄 승객·대기 시간, 만석으로 못 탄 횟수, 기다리다 떠난 승객
-function rs(r) { return r.st || (r.st = { seatKm: 0, paxKm: 0, peakLoad: 0, board: 0, waitSum: 0, full: 0, gave: 0 }); }
+function rs(r) { return r.st || (r.st = { seatKm: 0, paxKm: 0, peakLoad: 0, board: 0, waitSum: 0, full: 0, gave: 0, leftU: 0 }); }
+// 추천 열차 수: 이익이 가장 큰 대수
+//  타려던 사람 D = 탄 + 만석으로 놓친 + 기다리다 떠난. 자주 다닐수록 D가 늘어남(수요 식의 배차 배율)
+//  m대일 때 태울 수 있는 사람 = 지금 탄 사람 × (m/n) × (실제로 찰 수 있는 승차율 / 지금 승차율)
+//  이익 = 태운 사람 × 1인 평균 운임 − m × 1대 비용. 선로 용량(다른 노선 몫 제외)을 넘지 않게
+const FULL_OCC = 0.7;
+function recommendTrains(r, n, occ, st, rev, cost) {
+  const C = cycleMinutes(r);
+  const fq = h => 0.35 + 0.85 * Math.exp(-Math.min(h, 240) / 90);
+  const D = st.board + (st.leftU || 0) + st.gave;
+  let nMax = Infinity;
+  for (const leg of r.legs) for (const e of leg.edges) {
+    const other = Math.max(0, (edgeLoad.get(e.id) || 0) - 2 * n * 60 / C);
+    nMax = Math.min(nMax, Math.floor((edgeCap(e) - other) * C / 120));
+  }
+  nMax = Math.max(1, nMax);
+  const fare = rev / Math.max(1, st.board), c1 = cost / n;
+  let best = { m: 1, p: -Infinity };
+  for (let m = 1; m <= Math.min(300, nMax); m++) {
+    const want = D * fq(C / m) / fq(C / n);
+    const seats = st.board * (m / n) * (FULL_OCC / Math.max(0.05, occ));
+    const p = Math.min(want, seats) * fare - m * c1;
+    if (p > best.p + 1) best = { m, p };
+  }
+  return { rec: best.m, nMax, recProfit: best.p, capped: best.m >= nMax };
+}
 // 판정: 오늘 기록이 적으면(오전) 어제 기록으로
 function routeDiag(r) {
   const n = routeTrains(r).length;
@@ -637,16 +662,22 @@ function routeDiag(r) {
   const occ = st.seatKm ? st.paxKm / st.seatKm : 0, wait = st.board ? st.waitSum / st.board : 0;
   const gaveRate = st.gave / Math.max(1, st.gave + st.board), fullRate = st.full / Math.max(1, st.board);
   const hw = headway(r), hw1 = cycleMinutes(r) / (n + 1), hwm = n > 1 ? cycleMinutes(r) / (n - 1) : Infinity;
-  const base = { n, occ, wait, gaveRate, fullRate, st, hw, hw1, hwm, from: useY ? '어제' : '오늘' };
-  if (fullRate > 0.05 || st.peakLoad >= 0.98 && occ > 0.6)
-    return { ...base, level: 'more', icon: '🔴', label: '열차 부족(만석)', advice: `만석이라 못 탄 승객이 있습니다. 열차를 더 넣거나 정원이 큰 등급으로 올리세요` };
-  if (gaveRate > 0.2 && hw > 45)
-    return { ...base, level: 'more', icon: '🟠', label: '배차 간격이 김', advice: `기다리다 떠나는 승객이 ${Math.round(gaveRate * 100)}%입니다. 1대 더 넣으면 배차 ${Math.round(hw)}분 → ${Math.round(hw1)}분` };
-  if (occ < 0.15 && n >= 2)
-    return { ...base, level: 'less', icon: '🟡', label: '열차가 남음', advice: `승차율이 ${Math.round(occ * 100)}%로 낮습니다. 1대 빼도 됩니다(배차 ${Math.round(hw)}분 → ${Math.round(hwm)}분)` };
-  if (occ < 0.15 && n === 1)
-    return { ...base, level: 'low', icon: '🟡', label: '승객 적음', advice: `승차율이 ${Math.round(occ * 100)}%입니다. 열차를 늘릴 필요는 없고, 큰 역까지 늘리거나 정차역을 바꿔 보세요` };
-  return { ...base, level: 'ok', icon: '🟢', label: '적당', advice: gaveRate > 0.1 ? `1대 더 넣으면 배차 ${Math.round(hw)}분 → ${Math.round(hw1)}분으로 승객이 조금 늘어납니다` : '지금 열차 수가 알맞습니다' };
+  // 운임·비용: 같은 날 기록(오늘이면 지금까지, 어제면 하루치). 고정비는 지난 시간 비율만큼
+  const dayFrac = useY ? 1 : Math.max(0.05, (G.t - CFG.dayStartMin) / (CFG.dayEndMin - CFG.dayStartMin));
+  const rv = useY ? (r.yestRev || 0) : (r.revToday || 0), cs = (useY ? (r.yestCost || 0) : (r.costToday || 0)) + routeTrains(r).reduce((a, t) => a + tierOf(t).perDay, 0) * dayFrac;
+  const base = { n, occ, wait, gaveRate, fullRate, st, hw, hw1, hwm, from: useY ? '어제' : '오늘', ...recommendTrains(r, n, occ, st, rv, cs) };
+  // 판정은 추천 대수와 같은 방향으로: 추천이 지금보다 많으면 부족, 적으면 남음
+  const { rec } = base, diff = rec - n, near = Math.abs(diff) <= Math.max(1, Math.round(n * 0.15));
+  const lossy = base.recProfit < 0;
+  if (!near && diff > 0)
+    return fullRate > 0.05
+      ? { ...base, level: 'more', icon: '🔴', label: '열차 부족(만석)', advice: `만석이라 못 탄 승객이 있습니다. 약 ${rec}대로 늘리면 이익이 가장 큽니다(배차 ${Math.round(hw)}분 → ${Math.round(cycleMinutes(r) / rec)}분)` }
+      : { ...base, level: 'more', icon: '🟠', label: '배차 간격이 김', advice: `기다리다 떠나는 승객이 ${Math.round(gaveRate * 100)}%입니다. 약 ${rec}대로 늘리면 배차 ${Math.round(hw)}분 → ${Math.round(cycleMinutes(r) / rec)}분` };
+  if (!near && diff < 0)
+    return { ...base, level: 'less', icon: '🟡', label: '열차가 남음', advice: `승차율이 ${Math.round(occ * 100)}%입니다. 약 ${rec}대로 줄여도 승객은 거의 그대로고 비용이 줄어듭니다` };
+  if (lossy)
+    return { ...base, level: 'low', icon: '🟡', label: '적자 노선', advice: `열차 수를 바꿔도 적자입니다. 큰 역까지 늘리거나 정차역을 바꿔 보세요` };
+  return { ...base, level: 'ok', icon: '🟢', label: '적당', advice: `지금 열차 수가 알맞습니다(추천 약 ${rec}대)` };
 }
 
 // ───────────────────────── 조작 ─────────────────────────
