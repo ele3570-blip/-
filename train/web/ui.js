@@ -562,20 +562,34 @@ function openPanel(name) {
 function hidePanelForMap() { if (openPanelName) { panelBeforeMap = openPanelName; openPanel(null); } }
 function restorePanel() { if (panelBeforeMap) { openPanel(panelBeforeMap); panelBeforeMap = null; } }
 
+const foldedKinds = new Set(); // 노선 목록에서 접은 열차 종류
 function renderRoutes() {
   $('newRouteBtns').innerHTML = Object.entries(CFG.kinds).map(([k, K]) => { const need = S.needTrain(k, 0);
     return `<button data-newroute="${k}" ${lvLocked(need) ? 'disabled' : ''}>${lvLocked(need) ? lockTag(need) : K.icon} 새 ${K.name}<br><span class="muted">${k === 'general' ? '일반선' : k === 'metro' ? '전철화 선로' : S.level() < CFG.gate.hs ? `전철화 선로(고속선 Lv${CFG.gate.hs})` : '고속선·전철화 선로'}</span></button>`; }).join('');
-  $('routes').innerHTML = G.routes.map(r => {
+  // 열차 종류별로 묶음(일반 · 광역 · 고속). 머리줄을 누르면 접기/펴기
+  const card = r => {
     const ts = S.routeTrains(r), p = (r.revToday || 0) - (r.costToday || 0);
     return `<div class="route" data-route="${r.no}"><span class="sw" style="background:${r.color}"></span>
-      <span class="nm"><b>${kindIcon(r.kind)} ${esc(S.routeTitle(r))}</b> <span style="font-size:12px">${(d => `${d.icon} ${d.label}`)(S.routeDiag(r))}</span><br>
+      <span class="nm"><b>${esc(S.routeTitle(r))}</b> <span style="font-size:12px">${(d => `${d.icon} ${d.label}`)(S.routeDiag(r))}</span><br>
       <span class="meta">${fmt(S.routeKm(r))}km ${trackTags(r)} · ${r.stops.length}역 · 열차 ${ts.length}대 · 오늘 ${fmt(r.paxToday || 0)}명 · <span class="${p >= 0 ? 'pos' : 'neg'}">${won(p)}</span></span></span></div>`;
+  };
+  $('routes').innerHTML = Object.entries(CFG.kinds).map(([k, K]) => {
+    const rs = G.routes.filter(r => r.kind === k);
+    if (!rs.length) return '';
+    const pax = rs.reduce((a, r) => a + (r.paxToday || 0), 0), p = rs.reduce((a, r) => a + (r.revToday || 0) - (r.costToday || 0), 0);
+    const nt = rs.reduce((a, r) => a + S.routeTrains(r).length, 0), shut = foldedKinds.has(k);
+    return `<div class="kindhead" data-fold="${k}"><span>${shut ? '▸' : '▾'} ${K.icon} <b>${K.name}</b> <span class="muted">노선 ${rs.length} · 열차 ${nt}대</span></span>
+      <span class="muted" style="font-size:12px">오늘 ${fmt(pax)}명 · <span class="${p >= 0 ? 'pos' : 'neg'}">${won(p)}</span></span></div>
+      ${shut ? '' : rs.map(card).join('')}`;
   }).join('') || '<p class="muted">노선이 없습니다.</p>';
 }
 let depotRouteNo = null;
 function renderDepot() {
   const sel = $('depotRoute');
-  sel.innerHTML = '<option value="">(노선 선택)</option>' + G.routes.map(r => `<option value="${r.no}" ${r.no === depotRouteNo ? 'selected' : ''}>${kindIcon(r.kind)} ${esc(S.routeTitle(r))}</option>`).join('');
+  sel.innerHTML = '<option value="">(노선 선택)</option>' + Object.entries(CFG.kinds).map(([k, K]) => {
+    const rs = G.routes.filter(r => r.kind === k);
+    return rs.length ? `<optgroup label="${K.icon} ${K.name}">${rs.map(r => `<option value="${r.no}" ${r.no === depotRouteNo ? 'selected' : ''}>${esc(S.routeTitle(r))}</option>`).join('')}</optgroup>` : '';
+  }).join('');
   $('buyTrain').innerHTML = Object.entries(CFG.kinds).map(([k, K]) => { const need = S.needTrain(k, 0); return `<button data-buy="${k}" ${G.money < K.price || lvLocked(need) ? 'disabled' : ''}>${lvLocked(need) ? lockTag(need) : K.icon} ${K.levels[0].name}<br><b>${won(K.price)}</b><br><span class="muted">${K.levels[0].cap}명 · ${K.levels[0].vmax}km/h</span></button>`; }).join('');
   const r = G.routes.find(x => x.no === depotRouteNo);
   $('depot').innerHTML = (G.depot.length ? '' : '<p class="muted">차량기지가 비어 있습니다.</p>') + G.depot.map(t => {
@@ -1057,6 +1071,10 @@ document.addEventListener('click', e => {
   else if (d.repay) { const r = S.repay(d.repay === 'max' ? Infinity : +d.repay); check(r, r.amount ? `${won(r.amount)}을 갚았습니다` : ''); }
   else if (d.newgame) { showHome(); renderSlots('new'); }
   else if (d.lup) { const [id, what] = d.lup.split(':'); check(S.upgradeLine(lines.find(l => l.id === id), what), '공사를 마쳤습니다'); }
+});
+$('routes').addEventListener('click', e => {
+  const h = e.target.closest('[data-fold]'); if (!h) return;
+  const k = h.dataset.fold; foldedKinds.has(k) ? foldedKinds.delete(k) : foldedKinds.add(k); renderRoutes();
 });
 $('depotRoute').addEventListener('change', e => { depotRouteNo = +e.target.value || null; renderDepot(); });
 $('panelClose').onclick = () => openPanel(null);
