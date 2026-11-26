@@ -729,13 +729,32 @@ function renderRoutes() {
   }).join('') || '<p class="muted">노선이 없습니다.</p>';
 }
 let depotRouteNo = null;
+// 열차 등급표: 종류별 등급마다 레벨·값·속도·정원·비용. 이전 등급보다 오른 값은 초록 ▲
+function openTierTable() {
+  const up = (v, p, lowerBetter) => p == null || v === p ? '' : (lowerBetter ? v < p : v > p) ? ' <span class="pos" style="font-size:11px">▲</span>' : ' <span class="neg" style="font-size:11px">▼</span>';
+  const body = Object.entries(CFG.kinds).map(([k, K]) => `
+    <div style="margin:10px 0 4px"><b>${K.icon} ${K.name}</b> <span class="muted" style="font-size:12px">새로 사면 ${won(K.price)} · ${K.tracks.includes('hs') ? '고속선·전철화 일반선' : K.elec ? '전철화 선로만' : '일반선'}</span></div>
+    <div style="overflow-x:auto"><table class="tiers" style="width:100%;font-size:12px;border-collapse:collapse;white-space:nowrap">
+      <tr class="muted"><th>등급</th><th>레벨</th><th>올리는 값</th><th>최고속도</th><th>정원</th><th>정차 손실</th><th>운행비/km</th><th>하루 고정비</th><th>100km 운임</th><th>승차감</th></tr>
+      ${K.levels.map((L, i) => { const P = K.levels[i - 1] || null, need = S.needTrain(k, i), lock = lvLocked(need);
+        return `<tr style="${lock ? 'opacity:.55' : ''}"><td><span style="display:inline-block;width:8px;height:8px;border-radius:2px;background:${L.color}"></span> <b>${L.name}</b>${L.elec && !K.elec ? ' ⚡' : ''}</td>
+          <td>${lock ? '🔒' : ''}Lv${need}</td><td>${i ? won(L.upgrade) : '-'}</td>
+          <td>${L.vmax}km/h${up(L.vmax, P?.vmax)}</td><td>${L.cap}명${up(L.cap, P?.cap)}</td><td>${L.stopLoss}분${up(L.stopLoss, P?.stopLoss, true)}</td>
+          <td>${fmt(L.perKm)}원</td><td>${won(L.perDay)}</td><td>${fmt(S.fareFor(L, 100))}원</td><td>${L.comfort}</td></tr>`; }).join('')}
+    </table></div>`).join('');
+  showModal(`<h3 style="margin:0 0 4px">📊 열차 등급표</h3>
+    <div class="muted" style="font-size:12px">등급을 올릴수록 최고속도·정원이 오릅니다. 최고속도는 선로 속도를 넘지 못합니다(일반선 고속화 최대 ${CFG.speedMax}, 고속선 최대 ${CFG.speedMaxHs}km/h). 정차 손실 = 역에 한 번 설 때 잃는 시간. ⚡ = 전철화 선로만</div>
+    <div style="max-height:62vh;overflow-y:auto">${body}</div>
+    <button class="primary" id="askNo" style="width:100%;margin-top:10px">닫기</button>`);
+  $('askNo').onclick = hideModal;
+}
 function renderDepot() {
   const sel = $('depotRoute');
   sel.innerHTML = '<option value="">(노선 선택)</option>' + Object.entries(CFG.kinds).map(([k, K]) => {
     const rs = G.routes.filter(r => r.kind === k);
     return rs.length ? `<optgroup label="${K.icon} ${K.name}">${rs.map(r => `<option value="${r.no}" ${r.no === depotRouteNo ? 'selected' : ''}>${esc(S.routeTitle(r))}</option>`).join('')}</optgroup>` : '';
   }).join('');
-  $('buyTrain').innerHTML = Object.entries(CFG.kinds).map(([k, K]) => { const need = S.needTrain(k, 0); return `<button data-buy="${k}" ${G.money < K.price || lvLocked(need) ? 'disabled' : ''}>${lvLocked(need) ? lockTag(need) : K.icon} ${K.levels[0].name}<br><b>${won(K.price)}</b><br><span class="muted">${K.levels[0].cap}명 · ${K.levels[0].vmax}km/h</span></button>`; }).join('');
+  $('buyTrain').innerHTML = `<button data-tiers="1" style="grid-column:1/-1">📊 열차 등급표 (속도·정원·비용)</button>` + Object.entries(CFG.kinds).map(([k, K]) => { const need = S.needTrain(k, 0); return `<button data-buy="${k}" ${G.money < K.price || lvLocked(need) ? 'disabled' : ''}>${lvLocked(need) ? lockTag(need) : K.icon} ${K.levels[0].name}<br><b>${won(K.price)}</b><br><span class="muted">${K.levels[0].cap}명 · ${K.levels[0].vmax}km/h</span></button>`; }).join('');
   const r = G.routes.find(x => x.no === depotRouteNo);
   const waitCard = t => {
     const L = CFG.kinds[t.kind].levels, nx = L[t.lvl + 1], tier = S.tierOf(t);
@@ -863,10 +882,11 @@ function renderHelp() {
     · 새 노선: 종류 선택 → 정차할 역 클릭 → Enter(완료). 기본은 완료할 때 선로를 따라 가장 짧은 순서로 정리하고, 그리는 중 '🔀 짧은 순서' 버튼을 누르면 '👆 누른 순서' 그대로 씁니다<br>
     &nbsp;&nbsp;사이에 있는 역은 통과합니다(급행). Backspace: 마지막 역 취소 / Esc: 취소<br>
     · ✏️ 정차역 수정: 정차역 클릭 → 빼기, 다른 역 클릭 → 넣기, Enter 적용<br>
+    · 📊 열차 등급표: 차량기지 맨 위 버튼(<button data-tiers="1" style="padding:1px 6px;font-size:12px">열기</button>)<br>
     · 🚂 완행열차: 비둘기호 → 통일호 → 무궁화호 (싸고 느림, 모든 선로)<br>
     · 🚆 일반열차: 새마을호 → 누리로 → ITX-새마을 → ITX-마음 (누리로부터 전철화 선로만)<br>
     · 🚈 광역열차: 대경선 같은 지역 통근열차. 전철화 선로만. 광역열차만 태우는 <b>통근 승객</b>(4~70km, 출퇴근 7~9시·17~19시에 몰림)이 따로 있고, 배차가 잦을수록(10~20분) 크게 늘어납니다. 대도시 주변(대구·대전·수도권)에서 유리<br>
-    · 🚄 고속열차: KTX → KTX-산천 → KTX-이음(최고 260km/h지만 가감속 빠르고 운행비 쌈) → KTX-청룡. 고속선과 전철화된 일반선<br>
+    · 🚄 고속열차: KTX → KTX-산천 → KTX-이음 → KTX-청룡. 고속선과 전철화된 일반선<br>
     · 선로 색: 파랑 = 고속선(KTX만), 초록 = 전철 일반선, 갈색 점선 = 비전철 일반선(완행열차·새마을호만). 노선을 누르면 지나는 선로 종류가 색 띠와 km로 나옵니다<br>
     · 선로마다 시간당 다닐 수 있는 열차 수가 정해져 있습니다(단선 ${CFG.capSingle} · 복선 ${CFG.capDouble} · 고속선 ${CFG.capHs}). 넘치면 빨갛게 표시되고 느려집니다<br>
     · 역 모양 = 실제 하루 승차 인원(2025, 코레일): 점 간이역(200명 미만) · 동그라미 소형(200~) · 두 줄 동그라미 중형(1,000~) · 네모 대형(4,000~) · 두 줄 네모 초대형(12,000~). 게임 승객 1명 = 실제 ${Math.round(1 / CFG.demandScale)}명<br>
@@ -1404,6 +1424,7 @@ document.addEventListener('click', e => {
     if (err) toast(err); else toast(`${CFG.kinds[k].name} ${n}대를 ${CFG.kinds[k].levels[L].name}(으)로 올렸습니다${skip ? ` (비전철 노선 ${skip}대 제외)` : ''}`, '#15803d');
     refreshAll();
   }
+  else if (d.tiers) openTierTable();
   else if (d.ttedit) openTTEdit(findR(d.ttedit));
   else if (d.ttview) openTTView(findR(d.ttview));
   else if (d.respace) { const r = findR(d.respace); check(S.respaceRoute(r), `${S.routeTitle(r)}: 열차 ${S.routeTrains(r).length}대를 같은 간격으로 놓았습니다`); }

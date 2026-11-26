@@ -16,28 +16,27 @@ const CFG = {
   kinds: {
     // 완행: 모든 역에 서는 옛 보통열차 계열. 싸고 느림. 비전철 선로 OK
     local: { name: '완행열차', icon: '🚂', price: 1_500_000, tracks: ['conv'], levels: [
-      { name: '비둘기호', cap: 64, vmax: 120, stopLoss: 1.8, perKm: 80,  perDay: 12_000, fare: [1_500, 50], comfort: 0,  upgrade: 0,         color: '#64748b' },
-      { name: '통일호',   cap: 68, vmax: 135, stopLoss: 2.0, perKm: 120, perDay: 20_000, fare: [2_000, 58], comfort: 5,  upgrade: 1_500_000, color: '#b45309' },
-      { name: '무궁화호', cap: 72, vmax: 150, stopLoss: 2.5, perKm: 180, perDay: 30_000, fare: [2_600, 66], comfort: 10, upgrade: 2_500_000, color: '#2563eb' },
+      { name: '비둘기호', cap: 64, vmax: 110, stopLoss: 1.8, perKm: 80,  perDay: 12_000, fare: [1_500, 50], comfort: 0,  upgrade: 0,         color: '#64748b' },
+      { name: '통일호',   cap: 72, vmax: 130, stopLoss: 2.0, perKm: 120, perDay: 20_000, fare: [2_000, 58], comfort: 5,  upgrade: 1_500_000, color: '#b45309' },
+      { name: '무궁화호', cap: 80, vmax: 150, stopLoss: 2.5, perKm: 180, perDay: 30_000, fare: [2_600, 66], comfort: 10, upgrade: 2_500_000, color: '#2563eb' },
     ] },
     // 일반(특급): 새마을호(객차·비전철 OK) → 누리로부터는 전동차라 전철화 선로만
     general: { name: '일반열차', icon: '🚆', price: 6_000_000, tracks: ['conv'], levels: [
-      { name: '새마을호',   cap: 64, vmax: 150, stopLoss: 2.2, perKm: 260, perDay: 45_000, fare: [3_200, 98], comfort: 15, upgrade: 0,         color: '#16a34a' },
-      { name: '누리로',     cap: 70, vmax: 150, stopLoss: 1.6, perKm: 220, perDay: 42_000, fare: [3_200, 98], comfort: 16, upgrade: 3_000_000, color: '#ea580c', elec: true },
-      { name: 'ITX-새마을', cap: 76, vmax: 150, stopLoss: 1.5, perKm: 200, perDay: 40_000, fare: [3_200, 98], comfort: 20, upgrade: 3_500_000, color: '#dc2626', elec: true },
-      { name: 'ITX-마음',   cap: 84, vmax: 150, stopLoss: 1.4, perKm: 160, perDay: 35_000, fare: [3_200, 98], comfort: 25, upgrade: 4_000_000, color: '#7c3aed', elec: true },
+      { name: '새마을호',   cap: 72, vmax: 150, stopLoss: 2.2, perKm: 260, perDay: 45_000, fare: [3_200, 98], comfort: 15, upgrade: 0,         color: '#16a34a' },
+      { name: '누리로',     cap: 80, vmax: 160, stopLoss: 1.6, perKm: 220, perDay: 42_000, fare: [3_200, 98], comfort: 16, upgrade: 3_000_000, color: '#ea580c', elec: true },
+      { name: 'ITX-새마을', cap: 90, vmax: 180, stopLoss: 1.5, perKm: 200, perDay: 40_000, fare: [3_200, 98], comfort: 20, upgrade: 3_500_000, color: '#dc2626', elec: true },
+      { name: 'ITX-마음',   cap: 100, vmax: 200, stopLoss: 1.4, perKm: 160, perDay: 35_000, fare: [3_200, 98], comfort: 25, upgrade: 4_000_000, color: '#7c3aed', elec: true },
     ] },
     metro: { name: '광역열차', icon: '🚈', price: 2_500_000, tracks: ['conv'], elec: true, levels: [
-      { name: '광역전철 4량', cap: 120, vmax: 120, stopLoss: 1.0, perKm: 150, perDay: 40_000, fare: [1_500, 40], comfort: 0, upgrade: 0,         color: '#0d9488' },
-      { name: '광역전철 6량', cap: 180, vmax: 120, stopLoss: 1.0, perKm: 210, perDay: 50_000, fare: [1_500, 40], comfort: 3, upgrade: 2_000_000, color: '#0891b2' },
-      { name: '광역전철 8량', cap: 240, vmax: 120, stopLoss: 1.0, perKm: 270, perDay: 60_000, fare: [1_500, 40], comfort: 5, upgrade: 2_500_000, color: '#0369a1' },
+      { name: '광역전철 4량', cap: 120, vmax: 110, stopLoss: 1.0, perKm: 150, perDay: 40_000, fare: [1_500, 40], comfort: 0, upgrade: 0,         color: '#0d9488' },
+      { name: '광역전철 6량', cap: 180, vmax: 130, stopLoss: 1.0, perKm: 210, perDay: 50_000, fare: [1_500, 40], comfort: 3, upgrade: 2_000_000, color: '#0891b2' },
+      { name: '광역전철 8량', cap: 250, vmax: 150, stopLoss: 1.0, perKm: 270, perDay: 60_000, fare: [1_500, 40], comfort: 5, upgrade: 2_500_000, color: '#0369a1' },
     ] },
     ktx: { name: '고속열차', icon: '🚄', price: 40_000_000, tracks: ['hs', 'conv'], elec: true, levels: [
-      { name: 'KTX',      cap: 72,  vmax: 300, stopLoss: 3.8, perKm: 1_800, perDay: 700_000, fare: [8_400, 145], comfort: 20, upgrade: 0,          color: '#334155' },
-      { name: 'KTX-산천', cap: 76,  vmax: 300, stopLoss: 3.3, perKm: 1_650, perDay: 650_000, fare: [8_400, 150], comfort: 27, upgrade: 15_000_000, color: '#1e3a8a' },
-      // 이음: 최고속도는 낮지만(260) 가감속이 빠르고 운행비가 싸서 정차가 많은 노선·일반선에서 유리
-      { name: 'KTX-이음', cap: 84,  vmax: 260, stopLoss: 2.0, perKm: 1_400, perDay: 560_000, fare: [8_400, 150], comfort: 32, upgrade: 20_000_000, color: '#0f766e' },
-      { name: 'KTX-청룡', cap: 104, vmax: 320, stopLoss: 2.4, perKm: 1_700, perDay: 650_000, fare: [8_400, 155], comfort: 38, upgrade: 30_000_000, color: '#be185d' },
+      { name: 'KTX',      cap: 72,  vmax: 280, stopLoss: 3.8, perKm: 1_800, perDay: 700_000, fare: [8_400, 145], comfort: 20, upgrade: 0,          color: '#334155' },
+      { name: 'KTX-산천', cap: 82,  vmax: 300, stopLoss: 3.3, perKm: 1_650, perDay: 650_000, fare: [8_400, 150], comfort: 27, upgrade: 15_000_000, color: '#1e3a8a' },
+      { name: 'KTX-이음', cap: 92,  vmax: 310, stopLoss: 2.2, perKm: 1_400, perDay: 560_000, fare: [8_400, 150], comfort: 32, upgrade: 20_000_000, color: '#0f766e' },
+      { name: 'KTX-청룡', cap: 110, vmax: 330, stopLoss: 2.0, perKm: 1_700, perDay: 650_000, fare: [8_400, 155], comfort: 38, upgrade: 30_000_000, color: '#be185d' },
     ] },
   },
   hsTrackFeePerKm: 300,         // 고속선 선로 사용료(열차 1km당)
@@ -46,7 +45,7 @@ const CFG = {
   // 선로 용량: 한 시간에 지나갈 수 있는 열차 수(양방향 합). 넘치면 그만큼 느려짐
   capSingle: 4, capDouble: 16, capHs: 24,
   // 선로 개량 비용(km당)
-  elecPerKm: 100_000, dblPerKm: 150_000, speedPerKm: 80_000, speedStep: 30, speedMax: 200,
+  elecPerKm: 100_000, dblPerKm: 150_000, speedPerKm: 80_000, speedStep: 30, speedMax: 200, speedMaxHs: 330, speedHsMul: 2, // 고속선도 고속화(330km/h까지, 비용 2배)
   minTripKm: 8,
   // 목적지 끌림 = 하차 인원 × (e^(-거리/decay) + floor + local·e^(-거리/localKm)). local = 통근·통학 같은 가까운 이동
   tripDecayKm: 200, tripFloor: 0.1, tripLocal: 1.5, tripLocalKm: 30,
@@ -1065,7 +1064,7 @@ function sectionPrice(sec) {
   let per = CFG.secPerKm[l.kind];
   if (u.elec && !l.elec) per += CFG.elecPerKm;           // 이미 개량한 노선이면 이 구간 개량비도
   if (u.dbl && !l.dbl) per += CFG.dblPerKm;
-  if (u.speed) per += u.speed / CFG.speedStep * CFG.speedPerKm;
+  if (u.speed) per += u.speed / CFG.speedStep * CFG.speedPerKm * (l.kind === 'hs' ? CFG.speedHsMul : 1);
   return Math.max(CFG.secMin, r100k(sec.km * per));
 }
 const secOwned = sec => G.ownedSecs.has(sec.id);
@@ -1161,7 +1160,7 @@ function upgradeCost(l, what) {
   const km = ownedKm(l);
   if (what === 'elec') return lineElec(l) ? null : Math.round(km * CFG.elecPerKm / 100_000) * 100_000;
   if (what === 'dbl') return l.kind === 'hs' || lineDbl(l) ? null : Math.round(km * CFG.dblPerKm / 100_000) * 100_000;
-  if (what === 'speed') return l.kind === 'hs' || lineVmax(l) + CFG.speedStep > CFG.speedMax ? null : Math.round(km * CFG.speedPerKm / 100_000) * 100_000;
+  if (what === 'speed') { const hs = l.kind === 'hs'; return lineVmax(l) + CFG.speedStep > (hs ? CFG.speedMaxHs : CFG.speedMax) ? null : Math.round(km * CFG.speedPerKm * (hs ? CFG.speedHsMul : 1) / 100_000) * 100_000; }
   return null;
 }
 function upgradeLine(l, what) {
