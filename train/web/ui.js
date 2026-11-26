@@ -40,7 +40,7 @@ const hhmm = t => `${String(Math.floor(t / 60) % 24).padStart(2, '0')}:${String(
 const minTxt = m => m >= 60 ? `${Math.floor(m / 60)}시간 ${Math.round(m % 60)}분` : `${Math.round(m)}분`;
 let toastTimer;
 function toast(msg, bg = '#b91c1c') { const t = $('toast'); t.textContent = msg; t.style.background = bg; t.style.display = 'block'; clearTimeout(toastTimer); toastTimer = setTimeout(() => t.style.display = 'none', 2400); }
-function showModal(html) { $('modalBox').innerHTML = html; $('modal').style.display = 'flex'; }
+function showModal(html) { $('modalBox').style.maxWidth = ''; $('modalBox').innerHTML = html; $('modal').style.display = 'flex'; }
 function hideModal() { $('modal').style.display = 'none'; }
 // 확인창(브라우저 confirm 대신: 임베드된 페이지에서는 confirm이 막힘). Promise<boolean>
 // 버튼 여러 개 확인창: [{ key, label, primary }] → 누른 key (닫으면 null)
@@ -739,14 +739,14 @@ function openTierTable() {
       ${K.levels.map((L, i) => { const P = K.levels[i - 1] || null, need = S.needTrain(k, i), lock = lvLocked(need);
         return `<tr style="${lock ? 'opacity:.55' : ''}"><td><span style="display:inline-block;width:8px;height:8px;border-radius:2px;background:${L.color}"></span> <b>${L.name}</b>${L.elec && !K.elec ? ' ⚡' : ''}</td>
           <td>${lock ? '🔒' : ''}Lv${need}</td><td>${i ? won(L.upgrade) : '-'}</td>
-          <td>${L.vmax}km/h${up(L.vmax, P?.vmax)}</td><td>${L.cars}량 · 약 ${fmt(L.seats)}명</td><td>${L.cap}명${up(L.cap, P?.cap)}</td><td>${L.stopLoss}분${up(L.stopLoss, P?.stopLoss, true)}</td>
+          <td>${L.vmax}km/h${up(L.vmax, P?.vmax)}</td><td>${L.cars}량 · 약 ${fmt(L.seats)}${k === 'metro' ? '명' : '석'}</td><td>${L.cap}명${up(L.cap, P?.cap)}</td><td>${L.stopLoss}분${up(L.stopLoss, P?.stopLoss, true)}</td>
           <td>${fmt(L.perKm)}원</td><td>${won(L.perDay)}</td><td>${fmt(S.fareFor(L, 100))}원</td><td>${L.comfort}</td></tr>`; }).join('')}
     </table></div>`).join('');
   showModal(`<h3 style="margin:0 0 4px">📊 열차 등급표</h3>
-    <div class="muted" style="font-size:12px">등급을 올릴수록 최고속도·정원이 오릅니다. 최고속도는 선로 속도를 넘지 못합니다(일반선 고속화 최대 ${CFG.speedMax}, 고속선 최대 ${CFG.speedMaxHs}km/h). 정차 손실 = 역에 한 번 설 때 잃는 시간. ⚡ = 전철화 선로만<br>편성·정원은 실제 열차 기준(대략, 광역은 입석 포함, 산천·이음·청룡은 두 편성을 이은 중련). 게임 승객이 실제 하루 승차 인원의 1/5이라 <b>게임 정원 = 실제 정원 ÷ 5</b></div>
+    <div class="muted" style="font-size:12px">등급을 올릴수록 최고속도·정원이 오릅니다. 최고속도는 선로 속도를 넘지 못합니다(일반선 고속화 최대 ${CFG.speedMax}, 고속선 최대 ${CFG.speedMaxHs}km/h). 정차 손실 = 역에 한 번 설 때 잃는 시간. ⚡ = 전철화 선로만<br>편성·좌석은 실제 열차 기준(대략). 게임 승객이 실제 하루 승차 인원의 1/5이라 <b>게임 정원 ≈ 실제 정원 ÷ 5</b>. 등급을 올리면 정원이 늘도록 누리로·ITX는 중련(두 편성 연결), 광역·산천·이음·청룡은 입석 포함</div>
     <div style="max-height:62vh;overflow-y:auto">${body}</div>
     <button class="primary" id="askNo" style="width:100%;margin-top:10px">닫기</button>`);
-  $('askNo').onclick = hideModal;
+  $('modalBox').style.maxWidth = 'min(980px, 96vw)'; $('askNo').onclick = hideModal;
 }
 function renderDepot() {
   const sel = $('depotRoute');
