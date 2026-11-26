@@ -992,9 +992,11 @@ const localXY = e => { const r = cv.getBoundingClientRect(); return [e.clientX -
 cv.style.touchAction = 'none';
 cv.addEventListener('pointerdown', e => {
   const [x, y] = localXY(e);
-  pointers.set(e.pointerId, { x, y });
-  cv.setPointerCapture?.(e.pointerId);
-  if (pointers.size === 2) {
+  // 새 손짓의 첫 손가락(또는 마우스)이면 남아 있던 기록을 비움: 손가락 떼기를 놓쳐 한 손가락 끌기가 두 손가락 확대로 잡히던 문제
+  if (e.isPrimary || e.pointerType !== 'touch') { pointers.clear(); pinch = null; }
+  pointers.set(e.pointerId, { x, y, touch: e.pointerType === 'touch' });
+  try { cv.setPointerCapture(e.pointerId); } catch (err) { /* 이미 떨어진 손가락 */ }
+  if (pointers.size === 2 && [...pointers.values()].every(p => p.touch)) {
     const [p1, p2] = [...pointers.values()];
     pinch = { d: Math.hypot(p1.x - p2.x, p1.y - p2.y), z: cam.z, mx: (p1.x + p2.x) / 2, my: (p1.y + p2.y) / 2, wx: wx((p1.x + p2.x) / 2), wy: wy((p1.y + p2.y) / 2) };
     drag = null;
@@ -1003,8 +1005,8 @@ cv.addEventListener('pointerdown', e => {
 cv.addEventListener('pointermove', e => {
   if (!pointers.has(e.pointerId)) return;
   const [x, y] = localXY(e);
-  pointers.set(e.pointerId, { x, y });
-  if (pinch && pointers.size >= 2) {
+  pointers.set(e.pointerId, { ...pointers.get(e.pointerId), x, y });
+  if (pinch && pointers.size === 2) {
     const [p1, p2] = [...pointers.values()];
     const d = Math.hypot(p1.x - p2.x, p1.y - p2.y), mx = (p1.x + p2.x) / 2, my = (p1.y + p2.y) / 2;
     cam.z = Math.max(0.5, Math.min(60, pinch.z * d / (pinch.d || 1)));
@@ -1044,6 +1046,7 @@ function endPointer(e) {
 }
 cv.addEventListener('pointerup', endPointer);
 cv.addEventListener('pointercancel', endPointer);
+cv.addEventListener('lostpointercapture', e => { if (pointers.has(e.pointerId)) { pointers.delete(e.pointerId); if (pointers.size < 2) pinch = null; } });
 cv.addEventListener('pointermove', e => {
   mouse = { x: e.offsetX, y: e.offsetY };
   if (pinch) return;
