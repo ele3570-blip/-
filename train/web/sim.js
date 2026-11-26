@@ -788,21 +788,70 @@ function canDispatch(t, r) {
   if (!routeOpen(r)) return '노선에 아직 열지 않은 구간이 있습니다';
   return null;
 }
+// ── 노선 한 바퀴 위의 위치(분) ──
+// 한 바퀴 = 가는 구간 0..L-1, 오는 구간 L-1..0. 구간 길이 = 그 구간 달리는 시간 + 정차
+function cycleSegs(r, tier) {
+  const L = r.legs.length, segs = [];
+  for (let k = 0; k < L; k++) segs.push({ k, dir: 1, d: legMinutes(r.legs[k], tier) + CFG.dwellBase });
+  for (let k = L - 1; k >= 0; k--) segs.push({ k, dir: -1, d: legMinutes(r.legs[k], tier) + CFG.dwellBase });
+  return segs;
+}
+function cyclePos(t, segs) {
+  const L = t.route.legs.length, { j, dir } = nextIdx(t);
+  const k = Math.min(t.i, j), idx = dir === 1 ? k : L + (L - 1 - k);
+  let p = 0; for (let x = 0; x < idx; x++) p += segs[x].d;
+  return p + (t.legDur == null ? 0 : Math.min(t.legT, segs[idx].d));
+}
+function placeAt(t, r, p, segs) {
+  const C = segs.reduce((a, x) => a + x.d, 0);
+  p = ((p % C) + C) % C;
+  let idx = 0; while (idx < segs.length - 1 && p >= segs[idx].d) { p -= segs[idx].d; idx++; }
+  const sg = segs[idx], leg = r.legs[sg.k];
+  const dur = legMinutes(leg, tierOf(t));
+  Object.assign(t, { route: r, i: sg.dir === 1 ? sg.k : sg.k + 1, dir: sg.dir, legDur: dur, legT: Math.min(p, dur - 0.01), dwell: 0 });
+}
 function dispatch(t, r) {
   const err = canDispatch(t, r); if (err) return { err };
   G.depot = G.depot.filter(x => x !== t);
-  // 운행 중인 열차와 가장 먼 종착역에서 출발
+  t.pax = [];
+  // 운행 중인 열차들 사이에서 가장 큰 빈 간격의 한가운데에 넣음 → 몇 대를 넣어도 간격이 고름
   const ts = routeTrains(r);
-  const atEnd = ts.filter(o => o.dir === 1).length > ts.filter(o => o.dir === -1).length;
-  Object.assign(t, { route: r, i: atEnd ? r.stops.length - 1 : 0, dir: atEnd ? -1 : 1, legT: 0, legDur: null, dwell: 0.5, pax: [] });
+  if (!ts.length) Object.assign(t, { route: r, i: 0, dir: 1, legT: 0, legDur: null, dwell: 0.5 });
+  else {
+    const segs = cycleSegs(r, refTier(r)), C = segs.reduce((a, x) => a + x.d, 0);
+    const ps = ts.map(o => cyclePos(o, segs)).sort((a, b) => a - b);
+    let best = { gap: -1, at: 0 };
+    ps.forEach((p, k) => { const nx = k + 1 < ps.length ? ps[k + 1] : ps[0] + C, gap = nx - p; if (gap > best.gap) best = { gap, at: p + gap / 2 }; });
+    placeAt(t, r, best.at, segs);
+  }
+  if (r.lastDep) r.lastDep = {};
   G.trains.push(t);
+  if (ts.length >= 1) respaceRoute(r); // 넣은 뒤 노선 전체를 같은 간격으로
   rebuildNetwork();
   return {};
+}
+// 노선 열차들을 한 바퀴에 같은 간격으로 다시 놓기(타고 있던 승객은 도착한 것으로 처리)
+function respaceRoute(r) {
+  const ts = routeTrains(r); if (ts.length < 2) return { err: '열차가 2대 이상일 때 쓸 수 있습니다' };
+  const segs = cycleSegs(r, refTier(r)), C = segs.reduce((a, x) => a + x.d, 0);
+  const start = cyclePos(ts[0], segs);
+  ts.forEach((t, k) => { G.today.pax += t.pax.length; r.paxToday = (r.paxToday || 0) + t.pax.length; t.pax = []; placeAt(t, r, start + C * k / ts.length, segs); });
+  r.lastDep = {};
+  return {};
+}
+// 노선 열차 간격이 얼마나 고른지: 가장 긴 간격 ÷ 고른 간격 (1 = 완전히 고름)
+function spacingRatio(r) {
+  const ts = routeTrains(r); if (ts.length < 2) return 1;
+  const segs = cycleSegs(r, refTier(r)), C = segs.reduce((a, x) => a + x.d, 0);
+  const ps = ts.map(o => cyclePos(o, segs)).sort((a, b) => a - b);
+  let mx = 0; ps.forEach((p, k) => { mx = Math.max(mx, (k + 1 < ps.length ? ps[k + 1] : ps[0] + C) - p); });
+  return mx / (C / ts.length);
 }
 function recall(t) {
   G.trains = G.trains.filter(x => x !== t);
   const keep = { id: t.id, kind: t.kind, lvl: t.lvl, no: t.no };
   G.depot.push(keep);
+  if (t.route && G.routes.includes(t.route) && routeTrains(t.route).length >= 2) respaceRoute(t.route); // 빠진 자리 메우기
   rebuildNetwork();
   return keep;
 }
@@ -1013,7 +1062,7 @@ function setupNewGame() {
   rebuildNetwork();
 }
 
-root.SIM = { get commuteTable() { return commuteTable; }, CFG, D, G, level, levelOf, levelNeed, needTrain, lvErr, resetGame, routeDiag, upgradeBlock, dateOf, isMonthEnd, monthReport, startMonth, assetValue, creditGrade, loanLimit, canBorrow, borrow, repay, stations, byName, lines, edges, adj, sections, secById, edgeOwned, stOwned, secOwned, stationPrice, buyStation,
+root.SIM = { respaceRoute, spacingRatio, get commuteTable() { return commuteTable; }, CFG, D, G, level, levelOf, levelNeed, needTrain, lvErr, resetGame, routeDiag, upgradeBlock, dateOf, isMonthEnd, monthReport, startMonth, assetValue, creditGrade, loanLimit, canBorrow, borrow, repay, stations, byName, lines, edges, adj, sections, secById, edgeOwned, stOwned, secOwned, stationPrice, buyStation,
   sectionPrice, buySection, missingSections, buySections, ownedKm, regionName, toKm, distKm, isOpen, lineElec, lineDbl, lineVmax, edgeOpen, edgeCap,
   kindOf, tierOf, needsElec, edgeAllowed, findPath, buildLegs, addRoute, routeTitle, routeKm, routeHasNonElec, routeOpen, routeTrains,
   legMinutes, edgeSpeed, cycleMinutes, headway, rideMinutes, rideKm, rebuildNetwork, planFrom, hourShare, peakAt, tick, satPct, closeDay, startNextDay,

@@ -506,7 +506,9 @@ function routeHtml(r) {
     <div>오늘 승객 <b>${fmt(r.paxToday || 0)}</b>명 · 수입 ${won(r.revToday || 0)} · 운행비 ${won(r.costToday || 0)} · <span class="${profit >= 0 ? 'pos' : 'neg'}">${won(profit)}</span></div>
     <div>기다리는 승객 ${fmt(waiting)}명${r.leftToday ? ` · <span class="neg">만석으로 못 탄 승객 ${fmt(r.leftToday)}명</span>` : ''}</div>`;
   if (!S.routeOpen(r)) h += `<div class="neg">열리지 않은 지역을 지나 운행할 수 없습니다</div>`;
-  h += `<div class="wsub">열차 ${ts.length}대</div>${upAllHtml(r)}`;
+  { const sr = S.spacingRatio(r);
+    h += `<div class="wsub">열차 ${ts.length}대${ts.length >= 2 ? ` · 간격 ${sr < 1.25 ? '<span class="pos">고름</span>' : `<span class="neg">들쭉날쭉 (가장 긴 간격이 고른 간격의 ${sr.toFixed(1)}배)</span>`}` : ''}</div>
+      ${ts.length >= 2 ? `<div class="btns" style="display:flex;gap:4px;margin:2px 0 6px"><button data-respace="${r.no}" ${sr < 1.05 ? 'disabled' : ''}>⇆ 열차 간격 고르게</button></div>` : ''}${upAllHtml(r)}`; }
   for (const t of ts) h += `<div class="bus">${trainLabel(t)} · ${t.pax.length}/${S.tierOf(t).cap}명<div class="btns">${upBtn(t)}<button data-recall="${t.id}">회수</button></div></div>`;
   const cand = G.depot.filter(t => t.kind === r.kind);
   h += `<div class="btns" style="display:flex;flex-wrap:wrap;gap:4px;margin-top:6px">
@@ -1313,6 +1315,7 @@ document.addEventListener('click', e => {
     if (err) toast(err); else toast(`${CFG.kinds[k].name} ${n}대를 ${CFG.kinds[k].levels[L].name}(으)로 올렸습니다${skip ? ` (비전철 노선 ${skip}대 제외)` : ''}`, '#15803d');
     refreshAll();
   }
+  else if (d.respace) { const r = findR(d.respace); check(S.respaceRoute(r), `${S.routeTitle(r)}: 열차 ${S.routeTrains(r).length}대를 같은 간격으로 놓았습니다`); }
   else if (d.upall) {
     const [no, L] = d.upall.split(':').map(Number), r = findR(no);
     let n = 0, err = null;
