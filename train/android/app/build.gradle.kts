@@ -16,8 +16,8 @@ android {
         applicationId = "kr.railgame.app"
         minSdk = 24
         targetSdk = 35
-        versionCode = 26
-        versionName = "0.26"
+        versionCode = 27
+        versionName = "0.27"
     }
     signingConfigs {
         if (ksProps.isNotEmpty()) create("release") {

@@ -781,10 +781,11 @@ function renderDepot() {
     const shut = foldedDepot.has(k);
     return `<div class="kindhead" data-dfold="${k}"><span>${shut ? '▸' : '▾'} ${K.icon} <b>${K.name}</b> <span class="muted">대기 ${wait.length} · 운행 ${run.length}</span></span></div>
       ${shut ? '' : `${kindUpHtml(k)}
-      ${wait.length ? `<div class="wsub">차량기지 대기 (${wait.length}대)</div>${wait.map(waitCard).join('')}` : ''}
+      ${wait.length ? `<div class="wsub" style="display:flex;align-items:center;gap:6px">차량기지 대기 (${wait.length}대)${wait.length > 1 ? `<button data-sellall="${k}" style="margin-left:auto;padding:2px 8px;font-size:12px">💰 ${wait.length}대 모두 팔기 ${won(wait.reduce((a, t) => a + S.sellValue(t), 0))}</button>` : ''}</div>${wait.map(waitCard).join('')}` : ''}
       ${run.length ? `<div class="wsub">운행 중 (${run.length}대)</div>${run.map(runCard).join('')}` : ''}`}`;
   }).join('');
-  $('depot').innerHTML = html || '<p class="muted">열차가 없습니다. 위에서 사세요.</p>';
+  const allW = G.depot.length, allV = G.depot.reduce((a, t) => a + S.sellValue(t), 0);
+  $('depot').innerHTML = (allW ? `<div class="btns" style="display:flex;margin-bottom:6px"><button data-sellall="all" style="flex:1">💰 배차 안 된 열차 모두 팔기 (${allW}대 · ${won(allV)})</button></div>` : '') + (html || '<p class="muted">열차가 없습니다. 위에서 사세요.</p>');
 }
 // 노선 열차 한꺼번에 등급 올리기: 목표 등급마다 버튼(몇 대 · 합계 비용). 레벨·전철화로 막히면 이유
 function upAllCost(r, L) {
@@ -1403,6 +1404,10 @@ document.addEventListener('click', e => {
   else if (d.route && !e.target.closest('button')) { const r = findR(d.route); selected = { type: 'route', r }; depotRouteNo = r.no; if (narrow.matches) openPanel(null); focusRoute(r); renderInfo(); }
   else if (d.buy) { const res = S.buyTrain(d.buy); if (check(res, `${CFG.kinds[d.buy].levels[0].name}을(를) 샀습니다`)) refreshAll(); }
   else if (d.up) { const t = findT(d.up); check(S.upgradeTrain(t), `${S.tierOf(t).name}(으)로 올렸습니다`); }
+  else if (d.sellall) {
+    const ts = G.depot.filter(t => d.sellall === 'all' || t.kind === d.sellall), sum = ts.reduce((a, t) => a + S.sellValue(t), 0);
+    ask(`차량기지에 있는 ${d.sellall === 'all' ? '' : CFG.kinds[d.sellall].name + ' '}열차 ${ts.length}대를 모두 ${won(sum)}에 팔까요?`, '모두 팔기').then(ok => { if (ok) { ts.forEach(t => S.sellTrain(t)); toast(`${ts.length}대를 ${won(sum)}에 팔았습니다`, '#15803d'); refreshAll(); } });
+  }
   else if (d.sell) { const t = findT(d.sell); ask(`${trainLabel(t)}을(를) ${won(S.sellValue(t))}에 팔까요?`, '팔기').then(ok => { if (ok) { S.sellTrain(t); refreshAll(); } }); }
   else if (d.dispatch) { const r = findR(depotRouteNo); if (r) check(S.dispatch(findT(d.dispatch), r), `${S.routeTitle(r)}에 배차했습니다`); }
   else if (d.recall) { const t = G.trains.find(x => x.id === +d.recall); if (t) { S.recall(t); if (selected?.t === t) selected = null; refreshAll(); } }
