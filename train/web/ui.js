@@ -757,7 +757,7 @@ function renderHelp() {
     · 확장 순서: 🗺️ 지역 열기 → 🔧 선로 구간 사기 → 역 사기 → 노선 만들기<br>
     &nbsp;&nbsp;노선을 그리다 안 산 역·구간을 누르면 바로 살 수 있습니다<br>
     · 점선 테두리 역 = 아직 안 산 역 / 흐린 선로 = 아직 안 산 구간. 선로를 누르면 그 구간을 사거나 개량할 수 있습니다<br>
-    · 새 노선: 종류 선택 → 정차할 역을 순서대로 클릭 → Enter(완료)<br>
+    · 새 노선: 종류 선택 → 정차할 역 클릭 → Enter(완료). 기본은 완료할 때 선로를 따라 가장 짧은 순서로 정리하고, 그리는 중 '🔀 짧은 순서' 버튼을 누르면 '👆 누른 순서' 그대로 씁니다<br>
     &nbsp;&nbsp;사이에 있는 역은 통과합니다(급행). Backspace: 마지막 역 취소 / Esc: 취소<br>
     · ✏️ 정차역 수정: 정차역 클릭 → 빼기, 다른 역 클릭 → 넣기, Enter 적용<br>
     · 🚃 일반열차: 무궁화호 → ITX-새마을 → ITX-마음(전철화 선로만)<br>
@@ -844,12 +844,46 @@ function refreshAll() { assignSlots(); renderPanel(); renderInfo(); renderBadges
 
 // ───────────────────────── 노선 그리기·수정 ─────────────────────────
 function setHint(t) { const h = $('hint'); h.innerHTML = t; h.style.display = t ? 'block' : 'none'; }
+// 역 순서: 기본은 '짧은 순서'(완료할 때 선로를 따라 가장 짧게 이어지게 다시 늘어놓음), 원하면 '누른 순서' 그대로
+let autoOrder = (() => { try { return localStorage.getItem('korea-rail-order') !== 'click'; } catch (e) { return true; } })();
+function drawHint() {
+  const K = CFG.kinds[drawing.kind];
+  setHint(`${kindIcon(drawing.kind)} <b>새 ${K.name} 노선</b>: 정차할 역을 누르세요 ${autoOrder ? '(완료하면 짧은 순서로 정리)' : '(누른 순서대로)'}
+    <div class="hintbtns"><button data-draw="order" title="역 순서 정하는 방법 바꾸기">${autoOrder ? '🔀 짧은 순서' : '👆 누른 순서'}</button><button data-draw="undo" title="Backspace">↩ 되돌리기</button><button data-draw="cancel" title="Esc">취소</button><button class="primary" data-draw="done" title="Enter">완료</button></div>`);
+}
 function startDrawing(kind) {
   cancelEdit();
   drawing = { kind, stops: [], legs: [] };
   cv.classList.add('drawing'); hidePanelForMap(); selected = null; renderInfo();
-  setHint(`${kindIcon(kind)} <b>새 ${CFG.kinds[kind].name} 노선</b>: 정차할 역을 순서대로 누르세요
-    <div class="hintbtns"><button data-draw="undo" title="Backspace">↩ 되돌리기</button><button data-draw="cancel" title="Esc">취소</button><button class="primary" data-draw="done" title="Enter">완료</button></div>`);
+  drawHint();
+}
+// 고른 역들을 이미 산 선로로 가장 짧게 잇는 순서(열린 경로). 못 잇는 순서는 버림
+function shortestOrder(ids, kind) {
+  const n = ids.length; if (n < 3) return ids;
+  const D = ids.map(() => new Array(n).fill(Infinity));
+  for (let i = 0; i < n; i++) for (let j = i + 1; j < n; j++) { const P = S.findPath(ids[i], ids[j], kind); D[i][j] = D[j][i] = P ? P.km : Infinity; }
+  const len = ord => { let t = 0; for (let k = 1; k < ord.length; k++) t += D[ord[k - 1]][ord[k]]; return t; };
+  let best = null, bl = Infinity;
+  if (n <= 7) { // 모든 순서 따져 보기
+    const perm = (a, used) => {
+      if (a.length === n) { const l = len(a); if (l < bl) { bl = l; best = a.slice(); } return; }
+      for (let i = 0; i < n; i++) if (!used[i]) { used[i] = true; a.push(i); if (len(a) < bl) perm(a, used); a.pop(); used[i] = false; }
+    };
+    perm([], []);
+  } else { // 많으면: 가장 먼 두 역을 양 끝으로 놓고 가까운 순서로 채운 뒤 2-opt로 다듬기
+    let s0 = 0, s1 = 1; for (let i = 0; i < n; i++) for (let j = i + 1; j < n; j++) if (D[i][j] < Infinity && D[i][j] > D[s0][s1]) { s0 = i; s1 = j; }
+    const rest = [...Array(n).keys()].filter(i => i !== s0 && i !== s1).sort((a, b) => D[s0][a] - D[s0][b]);
+    let ord = [s0, ...rest, s1];
+    for (let improved = true, guard = 0; improved && guard < 50; guard++) {
+      improved = false;
+      for (let i = 1; i < n - 1; i++) for (let j = i + 1; j < n; j++) {
+        const cand = [...ord.slice(0, i), ...ord.slice(i, j + 1).reverse(), ...ord.slice(j + 1)];
+        if (len(cand) < len(ord) - 0.01) { ord = cand; improved = true; }
+      }
+    }
+    best = ord; bl = len(ord);
+  }
+  return bl < Infinity ? best.map(i => ids[i]) : ids;
 }
 // 안 산 역이면 살지 묻고 삼. 샀으면 true
 async function ensureStation(s) {
@@ -979,11 +1013,19 @@ async function drawClick(s) {
 function finishDrawing() {
   if (!drawing) return;
   if (drawing.stops.length < 2) { toast('역을 2개 이상 고르세요'); return; }
-  const r = S.addRoute(drawing.kind, drawing.stops);
+  let stops = drawing.stops, reordered = false;
+  if (autoOrder) {
+    const o = shortestOrder(stops, drawing.kind);
+    if (o.join() !== stops.join() && o.slice().reverse().join() !== stops.join()) {
+      // 누른 첫 역이 되도록 방향만 맞춤(가능하면)
+      stops = o[o.length - 1] === stops[0] ? o.reverse() : o; reordered = true;
+    }
+  }
+  const r = S.addRoute(drawing.kind, stops);
   drawing = null; cv.classList.remove('drawing'); setHint('');
   if (!r) return toast('노선을 만들 수 없습니다');
   selected = { type: 'route', r }; depotRouteNo = r.no;
-  toast(`${S.routeTitle(r)} 노선을 만들었습니다. 열차를 배차하세요`, '#15803d');
+  toast(`${S.routeTitle(r)} 노선을 만들었습니다${reordered ? ' (짧은 순서로 정리)' : ''}. 열차를 배차하세요`, '#15803d');
   refreshAll();
 }
 function cancelDrawing() { drawing = null; cv.classList.remove('drawing'); setHint(''); restorePanel(); }
@@ -1217,6 +1259,7 @@ document.addEventListener('click', e => {
     if (busy) return;
     if (d.draw === 'done') { if (drawing) finishDrawing(); else if (editing) applyEdit(); }
     else if (d.draw === 'cancel') { if (drawing) cancelDrawing(); else cancelEdit(); }
+    else if (d.draw === 'order' && drawing) { autoOrder = !autoOrder; try { localStorage.setItem('korea-rail-order', autoOrder ? 'short' : 'click'); } catch (err) { /* 저장 불가 */ } drawHint(); }
     else if (d.draw === 'undo' && drawing) { drawing.stops.pop(); drawing.legs.splice(Math.max(0, drawing.stops.length - 1)); }
   }
   else if (d.panel) openPanel(openPanelName === d.panel ? null : d.panel);
