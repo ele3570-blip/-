@@ -60,6 +60,12 @@ const CFG = {
   repStart: 1.0, repMin: 0.6, repMax: 1.4, repSpeed: 0.35,
   psoMinSat: 60, psoRatio: 0.5,    // 공익서비스 보상: 적자라도 만족도가 높으면 적자의 50%
   dayStartMin: 5 * 60, dayEndMin: 24 * 60,
+  // 통근 수요(광역열차 전용): 코레일 승하차 자료에 거의 없는 짧은 출퇴근 이동을 더함
+  //  두 역 하루(게임) 통근 = k × √(승차A × 승차B) × e^(−거리/decayKm) × 배차 배율(0.1 + 0.9·e^(−배차/freqMin))
+  //  minKm~maxKm 사이만. 출퇴근 시간(7~9시, 17~19시)에 몰림
+  //  승하차 자료에 거의 안 잡히는 도시 역 보정: 통근 계산에서만 광역시 구(○○구)에 있는 역은 최소 cityFloor, 그 밖은 townFloor
+  commute: { k: 0.05, decayKm: 25, minKm: 4, maxKm: 70, freqMin: 30, cityFloor: 2000, townFloor: 300,
+    hourly: [0.01, 0.04, 0.12, 0.16, 0.10, 0.04, 0.035, 0.035, 0.035, 0.035, 0.04, 0.05, 0.10, 0.13, 0.06, 0.03, 0.02, 0.01, 0.005] },
   // 회사 레벨: 누적 운임 수입으로 오르고, 레벨마다 열차·지역·공사가 풀림
   levels: [
     { need: 0,                desc: '비둘기호 · 광역전철 4량 · 대구권·경북 동해안·경북 북부·경남 지역' },
@@ -182,7 +188,7 @@ const level = () => levelOf();
 const levelNeed = lv => CFG.levels[lv - 1]?.need;
 const needTrain = (kind, lvl) => CFG.gate.train[`${kind}:${lvl}`] || 1;
 const lvErr = need => level() < need ? `회사 레벨 ${need}부터 할 수 있습니다 (지금 Lv${level()})` : null;
-function newToday() { return { interest: 0, pax: 0, transfers: 0, revenue: 0, cost: 0, potential: 0, spawned: 0, satSum: 0, satN: 0, gaveUp: 0, leftBehind: 0, trainKm: 0, bought: 0 }; }
+function newToday() { return { commute: 0, commuteSpawned: 0, interest: 0, pax: 0, transfers: 0, revenue: 0, cost: 0, potential: 0, spawned: 0, satSum: 0, satN: 0, gaveUp: 0, leftBehind: 0, trainKm: 0, bought: 0 }; }
 G.today = newToday();
 // 달력: 실제 달력. day 1 = CFG.startDate
 const WEEK = '일월화수목금토';
@@ -297,6 +303,9 @@ let edgeLoad = new Map();       // 엣지 → 시간당 열차 수(양방향)
 let edgeLoadFactor = new Map(); // 엣지 → 느려지는 배율(≥1)
 let servedBy = new Map();       // 역 → [노선]
 let destTable = new Map();      // 출발역 → { list:[역], cum:[], total, served } (served = 이어진 목적지 비율 × 서비스 질)
+let commuteTable = new Map();   // 출발역 → { list, cum, total(하루 통근 승객), map: d → { w, opts } }
+const commuteSum = CFG.commute.hourly.reduce((a, b) => a + b, 0);
+const spawnAccC = new Map();
 const baseWeight = new Map();   // 출발역 → { d → 끌림 } (열린 역 전부)
 
 function computeLoads() {
@@ -412,11 +421,30 @@ function rebuildNetwork() {
     const tot = weightTotal(o);
     destTable.set(oid, { list, cum, total: acc, served: tot ? acc / tot : 0, best });
   }
+  // 통근 표: 광역열차 노선 위 역 쌍마다 하루 통근 승객(게임 승객 수)
+  commuteTable = new Map();
+  { const C = CFG.commute, add = (o, d, w, r) => {
+      let T = commuteTable.get(o); if (!T) commuteTable.set(o, T = new Map());
+      const e = T.get(d) || { w: 0, opts: [] }; e.w += w; if (!e.opts.some(x => x.r === r)) e.opts.push({ r }); T.set(d, e);
+    };
+    for (const r of G.routes) {
+      if (!r.active || r.kind !== 'metro') continue;
+      const q = 0.1 + 0.9 * Math.exp(-r.hw / C.freqMin);
+      for (let i = 0; i < r.stops.length; i++) for (let j = i + 1; j < r.stops.length; j++) {
+        const km = Math.abs(r.cumKm[j] - r.cumKm[i]); if (km < C.minKm || km > C.maxKm) continue;
+        const A = stations[r.stops[i]], B = stations[r.stops[j]];
+        const fl = x => Math.max(x.on, /구$/.test(x.si) ? C.cityFloor : C.townFloor);
+        const w = C.k * Math.sqrt(fl(A) * fl(B)) * Math.exp(-km / C.decayKm) * q;
+        add(A.id, B.id, w, r); add(B.id, A.id, w, r);
+      }
+    }
+    for (const [o, T] of commuteTable) { const list = [], cum = []; let acc = 0; for (const [d, e] of T) { acc += e.w; list.push(d); cum.push(acc); } commuteTable.set(o, { list, cum, total: acc, map: T }); }
+  }
   // 기다리는 승객: 바뀐 노선으로 다시 계획, 갈 수 없으면 돌려보냄
   for (const [sid, q] of G.waiting) {
     G.waiting.set(sid, q.filter(p => {
       if (p.fixed && G.routes.includes(p.fixed) && p.fixed.active && p.fixed.idxOf.has(sid) && p.fixed.idxOf.has(p.dest)) { p.opts = [{ r: p.fixed }]; return true; }
-      p.fixed = null; p.opts = planFrom(sid, p.dest); return p.opts.length > 0;
+      p.fixed = null; p.opts = p.commute ? (commuteTable.get(sid)?.map.get(p.dest)?.opts || []) : planFrom(sid, p.dest); return p.opts.length > 0;
     }));
   }
 }
@@ -449,6 +477,23 @@ function spawn(dt) {
       G.waiting.get(s.id).push({ dest, opts: T.best.get(dest).opts, start: G.t, since: G.t, patience: patience() });
     }
     spawnAcc.set(s.id, a);
+  }
+  // 통근 승객(광역열차 전용)
+  const h = Math.floor(G.t / 60) - HOUR0, cs = (CFG.commute.hourly[Math.max(0, Math.min(CFG.commute.hourly.length - 1, h))] || 0) / commuteSum / 60 * dt;
+  for (const [oid, T] of commuteTable) {
+    if (!T.total) continue;
+    let a = (spawnAccC.get(oid) ?? Math.random()) + T.total * cs * G.rep;
+    while (a >= 1) {
+      a -= 1;
+      const x = Math.random() * T.total;
+      let lo = 0, hi = T.cum.length - 1;
+      while (lo < hi) { const m = (lo + hi) >> 1; if (T.cum[m] < x) lo = m + 1; else hi = m; }
+      const dest = T.list[lo];
+      G.today.spawned++; G.today.commuteSpawned++;
+      if (!G.waiting.has(oid)) G.waiting.set(oid, []);
+      G.waiting.get(oid).push({ dest, opts: T.map.get(dest).opts, start: G.t, since: G.t, patience: Math.min(40, patience()), commute: true });
+    }
+    spawnAccC.set(oid, a);
   }
 }
 
@@ -504,7 +549,7 @@ function arrive(t) {
       }
       const fare = fareFor(tier, rideKm(r, t.i, j));
       G.money += fare; G.today.revenue += fare; G.totalRev += fare; r.revToday = (r.revToday || 0) + fare;
-      if (!p.paid) { p.paid = true; recordSat(G.t - p.start, tier.comfort); }
+      if (!p.paid) { p.paid = true; recordSat(G.t - p.start, tier.comfort); if (p.commute) G.today.commute++; }
       { const st = rs(r); st.board++; st.waitSum += G.t - p.since; }
       t.pax.push({ dest: p.dest, j, next: opt.x != null ? opt.r2 : null, start: p.start });
       moved++;
@@ -613,7 +658,7 @@ function closeDay() {
   if (G.history.length > 60) G.history.shift();
   // 이번 달 누계
   const M = G.mon;
-  M.days++; M.pax += T.pax; M.transfers += T.transfers; M.gaveUp += T.gaveUp; M.leftBehind += T.leftBehind; M.potential += T.potential;
+  M.days++; M.commute = (M.commute || 0) + T.commute; M.pax += T.pax; M.transfers += T.transfers; M.gaveUp += T.gaveUp; M.leftBehind += T.leftBehind; M.potential += T.potential;
   M.revenue += T.revenue; M.opCost += T.cost - fixed; M.fixed += fixed; M.interest += interest; M.pso += pso; M.bought += T.bought; M.trainKm += T.trainKm;
   if (sat != null) { M.satSum += sat; M.satDays++; }
   M.sold.push(...sold); M.negMax = Math.max(M.negMax, G.negDays);
@@ -650,7 +695,8 @@ function rs(r) { return r.st || (r.st = { seatKm: 0, paxKm: 0, peakLoad: 0, boar
 const FULL_OCC = 0.7;
 function recommendTrains(r, n, occ, st, rev, cost) {
   const C = cycleMinutes(r);
-  const fq = h => 0.35 + 0.85 * Math.exp(-Math.min(h, 240) / 90);
+  // 배차 배율: 광역열차는 통근 승객이 대부분이라 배차에 훨씬 민감(통근 식), 나머지는 일반 수요 식
+  const fq = r.kind === 'metro' ? (h => 0.1 + 0.9 * Math.exp(-Math.min(h, 240) / CFG.commute.freqMin)) : (h => 0.35 + 0.85 * Math.exp(-Math.min(h, 240) / 90));
   const D = st.board + (st.leftU || 0) + st.gave;
   let nMax = Infinity;
   for (const leg of r.legs) for (const e of leg.edges) {
@@ -967,7 +1013,7 @@ function setupNewGame() {
   rebuildNetwork();
 }
 
-root.SIM = { CFG, D, G, level, levelOf, levelNeed, needTrain, lvErr, resetGame, routeDiag, upgradeBlock, dateOf, isMonthEnd, monthReport, startMonth, assetValue, creditGrade, loanLimit, canBorrow, borrow, repay, stations, byName, lines, edges, adj, sections, secById, edgeOwned, stOwned, secOwned, stationPrice, buyStation,
+root.SIM = { get commuteTable() { return commuteTable; }, CFG, D, G, level, levelOf, levelNeed, needTrain, lvErr, resetGame, routeDiag, upgradeBlock, dateOf, isMonthEnd, monthReport, startMonth, assetValue, creditGrade, loanLimit, canBorrow, borrow, repay, stations, byName, lines, edges, adj, sections, secById, edgeOwned, stOwned, secOwned, stationPrice, buyStation,
   sectionPrice, buySection, missingSections, buySections, ownedKm, regionName, toKm, distKm, isOpen, lineElec, lineDbl, lineVmax, edgeOpen, edgeCap,
   kindOf, tierOf, needsElec, edgeAllowed, findPath, buildLegs, addRoute, routeTitle, routeKm, routeHasNonElec, routeOpen, routeTrains,
   legMinutes, edgeSpeed, cycleMinutes, headway, rideMinutes, rideKm, rebuildNetwork, planFrom, hourShare, peakAt, tick, satPct, closeDay, startNextDay,

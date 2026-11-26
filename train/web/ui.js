@@ -782,7 +782,7 @@ function renderHelp() {
     · ✏️ 정차역 수정: 정차역 클릭 → 빼기, 다른 역 클릭 → 넣기, Enter 적용<br>
     · 🚂 완행열차: 비둘기호 → 통일호 → 무궁화호 (싸고 느림, 모든 선로)<br>
     · 🚆 일반열차: 새마을호 → 누리로 → ITX-새마을 → ITX-마음 (누리로부터 전철화 선로만)<br>
-    · 🚈 광역열차: 대경선 같은 지역 통근열차. 싸고 많이 타지만 요금이 낮음. 전철화 선로만<br>
+    · 🚈 광역열차: 대경선 같은 지역 통근열차. 전철화 선로만. 광역열차만 태우는 <b>통근 승객</b>(4~70km, 출퇴근 7~9시·17~19시에 몰림)이 따로 있고, 배차가 잦을수록(10~20분) 크게 늘어납니다. 대도시 주변(대구·대전·수도권)에서 유리<br>
     · 🚄 고속열차: KTX → KTX-산천 → KTX-이음(최고 260km/h지만 가감속 빠르고 운행비 쌈) → KTX-청룡. 고속선과 전철화된 일반선<br>
     · 선로 색: 파랑 = 고속선(KTX만), 초록 = 전철 일반선, 갈색 점선 = 비전철 일반선(완행열차·새마을호만). 노선을 누르면 지나는 선로 종류가 색 띠와 km로 나옵니다<br>
     · 선로마다 시간당 다닐 수 있는 열차 수가 정해져 있습니다(단선 ${CFG.capSingle} · 복선 ${CFG.capDouble} · 고속선 ${CFG.capHs}). 넘치면 빨갛게 표시되고 느려집니다<br>
@@ -1394,6 +1394,7 @@ function endDay() {
       <tr><td>수송 승객</td><td>${fmt(M.pax)}명 <span class="muted">(실제 ${fmt(M.pax / CFG.demandScale)}명)</span></td></tr>
       <tr><td>하루 평균</td><td>${fmt(M.pax / Math.max(1, M.days))}명</td></tr>
       <tr><td>갈아탄 승객</td><td>${fmt(M.transfers)}명</td></tr>
+      ${M.commute ? `<tr><td>통근 승객 (광역열차)</td><td>${fmt(M.commute)}명</td></tr>` : ''}
       <tr><td>기다리다 떠난 승객</td><td>${fmt(M.gaveUp)}명</td></tr>
       <tr><td>만석으로 못 탄 승객</td><td class="${M.leftBehind ? 'neg' : ''}">${fmt(M.leftBehind)}명</td></tr>
       <tr><td>수요 충족률</td><td>${M.cover.toFixed(1)}%</td></tr>
