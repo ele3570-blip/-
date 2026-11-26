@@ -43,6 +43,16 @@ function toast(msg, bg = '#b91c1c') { const t = $('toast'); t.textContent = msg;
 function showModal(html) { $('modalBox').innerHTML = html; $('modal').style.display = 'flex'; }
 function hideModal() { $('modal').style.display = 'none'; }
 // 확인창(브라우저 confirm 대신: 임베드된 페이지에서는 confirm이 막힘). Promise<boolean>
+// 버튼 여러 개 확인창: [{ key, label, primary }] → 누른 key (닫으면 null)
+function askChoice(msg, buttons) {
+  return new Promise(res => {
+    showModal(`<p style="white-space:pre-line;line-height:1.7;margin:0 0 16px">${esc(msg)}</p>
+      <div style="display:flex;flex-direction:column;gap:8px">${buttons.map(b => `<button data-choice="${b.key}" class="${b.primary ? 'primary' : ''}">${esc(b.label)}</button>`).join('')}
+      <button id="askNo">취소</button></div>`);
+    $('modalBox').querySelectorAll('[data-choice]').forEach(el => el.onclick = () => { hideModal(); res(el.dataset.choice); });
+    $('askNo').onclick = () => { hideModal(); res(null); };
+  });
+}
 function ask(msg, yes = '확인') {
   return new Promise(res => {
     showModal(`<p style="white-space:pre-line;line-height:1.7;margin:0 0 16px">${esc(msg)}</p>
@@ -821,8 +831,11 @@ async function ensureStation(s) {
 function planLink(a, b, kind) {
   const B = stations[b];
   const P = S.findPath(a, b, kind);
-  if (P && S.stOwned(b)) return { path: P, cost: 0, regions: [], secs: [], buySt: false };
-  let Q = P || S.findPath(a, b, kind, true) || S.findPath(a, b, kind, 'all');
+  // 이미 산 선로로만 가면 크게 돌아가는데, 조금 사면 훨씬 짧아지는 경우: 짧은 길을 제안하고 돌아가는 길은 따로 선택지로
+  const Qbuy = S.findPath(a, b, kind, true) || S.findPath(a, b, kind, 'all');
+  const detour = P && Qbuy && P.km > Qbuy.km * 1.3 + 5 ? P : null;
+  if (P && !detour && S.stOwned(b)) return { path: P, cost: 0, regions: [], secs: [], buySt: false };
+  let Q = (detour ? Qbuy : P) || Qbuy;
   let elec = [];
   // 전철화가 필요한 열차(광역·KTX·ITX-마음)인데 비전철 선로 때문에 막히면: 일반열차 길로 잇고 그 선로를 전철화까지 함께 제안
   if (!Q && (CFG.kinds[kind].elec || kind === 'ktx')) {
@@ -848,7 +861,7 @@ function planLink(a, b, kind) {
   });
   const cost = regions.reduce((x, rg) => x + CFG.unlockCost[rg], 0) + secs.reduce((x, sc) => x + S.sectionPrice(sc), 0) + (buySt ? S.stationPrice(B) : 0)
     + elecCost.reduce((x, e) => x + e.cost, 0);
-  return { path: Q, regions, secs, buySt, elec: elecCost, cost };
+  return { path: Q, regions, secs, buySt, elec: elecCost, cost, detour };
 }
 // 왜 못 가는지: 전철화·고속선 레벨·선로 없음
 function whyNoLink(a, b, kind) {
@@ -874,7 +887,9 @@ function mergePlans(parts, b) {
   const sl = [...secs.values()], B = stations[b], buySt = !S.stOwned(B);
   const elec = [...elecLines].map(l => { const km = S.ownedKm(l) + sl.filter(sc => sc.line === l).reduce((a, sc) => a + sc.km, 0); return { line: l, km, cost: Math.round(km * CFG.elecPerKm / 100_000) * 100_000 }; });
   const cost = regions.reduce((a, rg) => a + CFG.unlockCost[rg], 0) + sl.reduce((a, sc) => a + S.sectionPrice(sc), 0) + (buySt ? S.stationPrice(B) : 0) + elec.reduce((a, e) => a + e.cost, 0);
-  return { regions, secs: sl, buySt, elec, cost };
+  // 돌아가는 길 정보도 합침(어느 한쪽이라도 '사면 짧아지는' 경우)
+  const detour = parts.some(x => x.detour) ? { km: parts.reduce((a, x) => a + (x.detour || x.path).km, 0) } : null;
+  return { regions, secs: sl, buySt, elec, cost, detour, path: { km: parts.reduce((a, x) => a + x.path.km, 0) } };
 }
 async function buyLink(plan, b) {
   const B = stations[b];
@@ -885,8 +900,18 @@ async function buyLink(plan, b) {
     ...(plan.buySt ? [`· 🏷 ${B.name}역  ${won(S.stationPrice(B))}`] : []),
     ...(plan.elec || []).map(x => `· ⚡ ${x.line.name} 전철화 (산 구간 ${fmt(x.km)}km)  ${won(x.cost)}`),
   ];
-  if (G.money < plan.cost) { toast(`돈이 부족합니다 (필요 ${won(plan.cost)}, 가진 돈 ${won(G.money)})`); return false; }
-  if (!await ask(`${B.name}까지 이으려면 아래가 필요합니다.\n${lines.join('\n')}\n\n모두 ${won(plan.cost)}에 살까요?`, `${won(plan.cost)}에 사기`)) return false;
+  if (plan.detour) {
+    // 사면 짧고, 안 사면 이미 산 선로로 돌아감
+    const can = G.money >= plan.cost;
+    const pick = await askChoice(`${B.name}까지 이미 산 선로로는 ${fmt(plan.detour.km)}km를 돌아갑니다.\n아래를 사면 ${fmt(plan.path.km)}km로 바로 갈 수 있습니다.\n${lines.join('\n')}`,
+      [{ key: 'buy', label: can ? `${won(plan.cost)}에 사서 짧게 (${fmt(plan.path.km)}km)` : `돈 부족 (필요 ${won(plan.cost)})`, primary: can },
+       { key: 'detour', label: `사지 않고 돌아가기 (${fmt(plan.detour.km)}km)` }]);
+    if (pick === 'detour') return 'detour';
+    if (pick !== 'buy' || !can) return false;
+  } else {
+    if (G.money < plan.cost) { toast(`돈이 부족합니다 (필요 ${won(plan.cost)}, 가진 돈 ${won(G.money)})`); return false; }
+    if (!await ask(`${B.name}까지 이으려면 아래가 필요합니다.\n${lines.join('\n')}\n\n모두 ${won(plan.cost)}에 살까요?`, `${won(plan.cost)}에 사기`)) return false;
+  }
   for (const rg of plan.regions) if (!check(S.unlockRegion(rg))) return false;
   if (plan.buySt && !check(S.buyStation(B))) return false;
   if (plan.secs.length && !check(S.buySections(plan.secs))) return false;
@@ -944,7 +969,9 @@ async function editClick(s) {
     if (st.length <= 2) return toast('정차역은 2개 이상이어야 합니다');
     st.splice(k, 1);
   } else {
-    // 끼워 넣을 자리마다 (앞 역 → 이 역, 이 역 → 뒤 역)을 잇는 데 필요한 것을 계산해 가장 싸고 덜 돌아가는 자리를 고름
+    // 끼워 넣을 자리마다 (앞 역 → 이 역, 이 역 → 뒤 역)을 잇는 데 필요한 것을 계산해
+    // 노선이 가장 덜 늘어나는 자리(늘어나는 km)를 고름. 거리가 거의 같을 때만 싼 쪽
+    // (돈 우선으로 고르면 이미 산 선로로 크게 돌아가는 자리를 고르는 문제가 있었음)
     let best = null, lastErr = null;
     for (let i = 0; i <= st.length; i++) {
       const prev = st[i - 1], next = st[i], parts = [];
@@ -952,8 +979,9 @@ async function editClick(s) {
       if (next != null) parts.push(planLink(s.id, next, editing.kind));
       const bad = parts.find(x => x.err); if (bad) { lastErr = bad.err; continue; }
       const plan = mergePlans(parts, s.id);
-      const km = parts.reduce((a, x) => a + (x.path ? x.path.km : 0), 0);
-      if (!best || plan.cost < best.plan.cost - 1 || (Math.abs(plan.cost - best.plan.cost) <= 1 && km < best.km)) best = { plan, km, i };
+      const direct = prev != null && next != null ? (editing.legs[i - 1]?.km || 0) : 0; // 원래 앞역→뒤역 거리
+      const km = parts.reduce((a, x) => a + (x.path ? x.path.km : 0), 0) - direct;      // 늘어나는 거리
+      if (!best || km < best.km - 2 || (Math.abs(km - best.km) <= 2 && plan.cost < best.plan.cost)) best = { plan, km, i };
     }
     if (!best) return toast(lastErr || '이 역은 노선과 이어지지 않습니다');
     if (!await buyLink(best.plan, s.id) || !editing) return;
@@ -1474,4 +1502,4 @@ window.__back = () => {
   return false;
 };
 window.__pauseSave = () => { if ($('modal').style.display !== 'flex') { G.paused = true; setSpeedUI(); } save(); };
-window.__UI = { G, S, cam, sx, sy, fitStations }; // 디버그·자동 점검용
+window.__UI = { G, S, cam, sx, sy, fitStations, planLink }; // 디버그·자동 점검용
