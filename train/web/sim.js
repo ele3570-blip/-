@@ -71,28 +71,31 @@ const CFG = {
     hourly: [0.01, 0.04, 0.12, 0.16, 0.10, 0.04, 0.035, 0.035, 0.035, 0.035, 0.04, 0.05, 0.10, 0.13, 0.06, 0.03, 0.02, 0.01, 0.005] },
   // 회사 레벨: 누적 운임 수입으로 오르고, 레벨마다 열차·지역·공사가 풀림
   levels: [
-    { need: 0,                desc: '비둘기호 · 광역전철 4량 · 대구권·경북 동해안·경북 북부·경남 지역' },
-    { need: 150_000_000,      desc: '부산·울산 지역 · 통일호' },
-    { need: 400_000_000,      desc: '전철화 공사 · 무궁화호 · 새마을호' },
-    { need: 1_000_000_000,    desc: '광역전철 6량 · 복선화 공사 · 충북 지역 · 누리로' },
-    { need: 2_500_000_000,    desc: '대전·충남·세종 지역' },
-    { need: 5_000_000_000,    desc: 'KTX(전철화된 일반선만) · ITX-새마을' },
-    { need: 10_000_000_000,   desc: '고속선 구간 구입 · KTX-산천' },
-    { need: 20_000_000_000,   desc: '수도권 지역 · KTX-이음' },
-    { need: 40_000_000_000,   desc: 'ITX-마음 · 고속화 공사 · 강원 지역' },
-    { need: 70_000_000_000,   desc: '광역전철 8량 · 전북 지역' },
-    { need: 120_000_000_000,  desc: '광주·전남 지역' },
-    { need: 200_000_000_000,  desc: 'KTX-청룡' },
+    { need: 0,                desc: '비둘기호 · 광역전철 4량 · 대구권' },
+    { need: 100_000_000,      desc: '경북 북부 지역' },
+    { need: 250_000_000,      desc: '경북 동해안 지역 · 통일호' },
+    { need: 500_000_000,      desc: '경남 지역' },
+    { need: 1_000_000_000,    desc: '부산·울산 지역' },
+    { need: 2_000_000_000,    desc: '전철화 공사 · 무궁화호 · 새마을호' },
+    { need: 4_000_000_000,    desc: '광역전철 6량 · 복선화 공사 · 충북 지역 · 누리로' },
+    { need: 8_000_000_000,    desc: '대전·충남·세종 지역' },
+    { need: 15_000_000_000,   desc: 'KTX(전철화된 일반선만) · ITX-새마을' },
+    { need: 30_000_000_000,   desc: '고속선 구간 구입 · KTX-산천' },
+    { need: 60_000_000_000,   desc: '수도권 지역 · KTX-이음' },
+    { need: 100_000_000_000,  desc: 'ITX-마음 · 고속화 공사 · 강원 지역' },
+    { need: 160_000_000_000,  desc: '광역전철 8량 · 전북 지역' },
+    { need: 250_000_000_000,  desc: '광주·전남 지역' },
+    { need: 400_000_000_000,  desc: 'KTX-청룡' },
   ],
   // 필요한 레벨(1부터). 열차는 '종류:등급'
   gate: {
-    train: { 'local:0': 1, 'local:1': 2, 'local:2': 3, 'general:0': 3, 'general:1': 4, 'general:2': 6, 'general:3': 9,
-             'metro:0': 1, 'metro:1': 4, 'metro:2': 10, 'ktx:0': 6, 'ktx:1': 7, 'ktx:2': 8, 'ktx:3': 12 },
-    region: { daegu: 1, gyeongbuk_e: 1, gyeongbuk_n: 1, gyeongnam: 1, busan: 2, chungbuk: 4, chungcheong: 5, capital: 8, gangwon: 9, jeonbuk: 10, jeonnam: 11 },
-    work: { elec: 3, dbl: 4, speed: 9 },
-    hs: 7,
+    train: { 'local:0': 1, 'local:1': 3, 'local:2': 6, 'general:0': 6, 'general:1': 7, 'general:2': 9, 'general:3': 12,
+             'metro:0': 1, 'metro:1': 7, 'metro:2': 13, 'ktx:0': 9, 'ktx:1': 10, 'ktx:2': 11, 'ktx:3': 15 },
+    region: { daegu: 1, gyeongbuk_n: 2, gyeongbuk_e: 3, gyeongnam: 4, busan: 5, chungbuk: 7, chungcheong: 8, capital: 11, gangwon: 12, jeonbuk: 13, jeonnam: 14 },
+    work: { elec: 6, dbl: 7, speed: 12 },
+    hs: 10,
   },
-  loanLevelMul: [0.5, 0.6, 0.7, 0.85, 1, 1.15, 1.3, 1.5, 1.7, 1.9, 2.1, 2.3], // 대출 한도 × 레벨 배율
+  loanLevelMul: [0.5, 0.55, 0.6, 0.65, 0.7, 0.8, 0.9, 1, 1.15, 1.3, 1.5, 1.7, 1.9, 2.1, 2.3], // 대출 한도 × 레벨 배율
   startDate: [2026, 1, 1], // 1일째 = 2026년 1월 1일. 실제 달력(달마다 28~31일), 달이 끝나면 월 결산
   // 은행 대출. 한도 = (기본 + 자산 × 비율) × 등급 배율, 이자는 하루 결산 때 남은 빚 × 하루 이자율
   loan: {
@@ -1268,7 +1271,7 @@ function deserialize(s) {
   migrateKinds(o);
   // 누적 수입이 없는 예전 저장: 남아 있는 결산 기록으로 어림
   const estRev = (o.history || []).reduce((a, h) => a + (h.revenue || 0), 0) + (o.mon?.revenue || 0);
-  Object.assign(G, { money: o.money, totalRev: o.totalRev ?? estRev, shownLevel: o.shownLevel ?? levelOf(o.totalRev ?? estRev), debt: o.debt || 0, negDays: o.negDays || 0, over: !!o.over, day: o.day, rep: o.rep, unlocked: new Set(o.unlocked), lineUp: o.lineUp || {},
+  Object.assign(G, { money: o.money, totalRev: o.totalRev ?? estRev, shownLevel: Math.min(o.shownLevel ?? 99, levelOf(o.totalRev ?? estRev)), // 레벨 기준이 바뀌어 내려갔으면 지금 레벨로 debt: o.debt || 0, negDays: o.negDays || 0, over: !!o.over, day: o.day, rep: o.rep, unlocked: new Set(o.unlocked), lineUp: o.lineUp || {},
     ownedSecs: new Set(o.ownedSecs || []), ownedSt: new Set(o.ownedSt || []),
     nextRouteNo: o.nextRouteNo, nextTrainId: o.nextTrainId, history: o.history || [], t: CFG.dayStartMin, today: newToday(), waiting: new Map() });
   G.mon = o.mon || newMonth();
