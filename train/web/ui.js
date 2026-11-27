@@ -32,6 +32,8 @@ splitEmoji(document.body);
 const fmt = n => Math.round(n).toLocaleString('ko-KR');
 const won = n => {
   const a = Math.abs(n), s = n < 0 ? '-' : '';
+  if (a >= 1e12) { const jo = Math.floor(a / 1e12), eok = Math.round(a % 1e12 / 1e8); return s + fmt(jo) + '조' + (eok ? ' ' + fmt(eok) + '억' : '') + '원'; }
+  if (a >= 1e11) return s + fmt(Math.round(a / 1e8)) + '억원';
   if (a >= 1e8) return s + (a / 1e8).toFixed(a >= 1e9 ? 1 : 2).replace(/\.?0+$/, '') + '억원';
   if (a >= 1e4) return s + fmt(a / 1e4) + '만원';
   return s + fmt(a) + '원';
