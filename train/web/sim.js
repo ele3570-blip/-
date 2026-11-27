@@ -129,6 +129,10 @@ const CFG = {
     tunnel: 19, // 한일 해저터널 공사
   },
   tunnel: { cost: 1_000_000_000_000, days: 365 },
+  // 물가: 늦게 열리는 것일수록 비쌈. 배율 = (그 레벨에서 다음 레벨까지 필요한 수입 ÷ Lv1의 것) ^ 지수
+  // 선로·역·공사는 지수 infExp, 열차·등급 올리기는 trainExp(열차 1대가 버는 돈은 레벨이 올라도 크게 늘지 않아서 덜 오름)
+  // upkeep: 산 선로·역의 하루 유지비 = 지금 값 × 비율
+  price: { infExp: 0.85, trainExp: 0.5, trainMax: 30, upkeep: 0.0005 }, // 열차 배율은 최대 30배(1대가 버는 돈으로 몇 달 안에 갚을 수 있게)
   loanLevelMul: [0.5, 0.59, 0.69, 0.78, 0.88, 0.97, 1.07, 1.16, 1.26, 1.35, 1.45, 1.54, 1.64, 1.73, 1.83, 1.92, 2.02, 2.11, 2.21, 2.3], // 대출 한도 × 레벨 배율
   startDate: [2026, 1, 1], // 1일째 = 2026년 1월 1일. 실제 달력(달마다 28~31일), 달이 끝나면 월 결산
   // 은행 대출. 한도 = (기본 + 자산 × 비율) × 등급 배율, 이자는 하루 결산 때 남은 빚 × 하루 이자율
@@ -143,9 +147,10 @@ const CFG = {
     graceDays: 3, // 자금이 마이너스인 채로 이만큼 하루를 마치면 강제 매각
   },
   // 지역을 연 뒤에도 쓰려는 선로 구간과 역을 따로 사야 함
-  unlockCost: { gyeongbuk_e: 8_000_000, gyeongbuk_n: 5_000_000, busan: 15_000_000, gyeongnam: 8_000_000,
-                chungcheong: 40_000_000, chungbuk: 20_000_000, capital: 120_000_000, gangwon: 30_000_000,
-                jeonbuk: 30_000_000, jeonnam: 40_000_000,
+  // 한국 지역: 그 지역 레벨에서 다음 레벨까지 버는 돈의 약 10%
+  unlockCost: { gyeongbuk_n: 30_000_000, gyeongbuk_e: 50_000_000, gyeongnam: 140_000_000, busan: 360_000_000,
+                chungbuk: 800_000_000, chungcheong: 2_000_000_000, capital: 10_000_000_000, gangwon: 20_000_000_000,
+                jeonbuk: 40_000_000_000, jeonnam: 60_000_000_000,
                 nk_hwanghae: 50_000_000_000, nk_pyongyang: 100_000_000_000, nk_pyongbuk: 100_000_000_000, nk_east: 100_000_000_000, nk_north: 150_000_000_000,
                 jp_kyushu: 200_000_000_000, jp_chugoku: 300_000_000_000, jp_shikoku: 100_000_000_000, jp_kansai: 500_000_000_000,
                 jp_chubu: 700_000_000_000, jp_kanto: 1_000_000_000_000, jp_tohoku: 500_000_000_000, jp_hokkaido: 300_000_000_000 },
@@ -227,6 +232,17 @@ const freshState = () => ({
   tunnel: null, // 한일 해저터널: { start, end, done }
 });
 const G = freshState();
+// 물가 배율
+function levelGap(lv) { const L = CFG.levels, a = L[lv - 1]?.need ?? 0, b = L[lv]?.need ?? L[L.length - 1].need * 1.67; return Math.max(1, b - a); }
+const priceMul = (lv, exp, max = Infinity) => Math.min(max, Math.max(1, Math.pow(levelGap(lv) / levelGap(1), exp)));
+const infMul = region => priceMul(CFG.gate.region[region] || 1, CFG.price.infExp);
+// 열차 값·등급 올리는 값: 그 등급이 열리는 레벨의 배율(처음 값은 basePrice·baseUpgrade로 남김)
+for (const [k, K] of Object.entries(CFG.kinds)) {
+  if (K.basePrice == null) K.basePrice = K.price;
+  K.price = Math.round(K.basePrice * priceMul(CFG.gate.train[`${k}:0`] || 1, CFG.price.trainExp, CFG.price.trainMax) / 100_000) * 100_000 || K.basePrice;
+  K.levels.forEach((L, i) => { if (!i) return; if (L.baseUpgrade == null) L.baseUpgrade = L.upgrade;
+    L.upgrade = Math.round(L.baseUpgrade * priceMul(CFG.gate.train[`${k}:${i}`] || 1, CFG.price.trainExp, CFG.price.trainMax) / 100_000) * 100_000; });
+}
 // 회사 레벨
 function levelOf(rev = G.totalRev) { let lv = 1; CFG.levels.forEach((x, i) => { if (rev >= x.need) lv = i + 1; }); return lv; }
 const level = () => levelOf();
@@ -877,7 +893,8 @@ function closeDay() {
   const T = G.today;
   let fixed = 0;
   for (const t of G.trains) fixed += tierOf(t).perDay;
-  G.money -= fixed; T.cost += fixed; T.fixed = fixed;
+  const upkeep = upkeepPerDay();
+  G.money -= fixed + upkeep; T.cost += fixed + upkeep; T.fixed = fixed; T.upkeep = upkeep;
   const sat = satPct();
   const profit = T.revenue - T.cost;
   let pso = 0;
@@ -915,7 +932,7 @@ function closeDay() {
   // 이번 달 누계
   const M = G.mon;
   M.days++; M.commute = (M.commute || 0) + T.commute; for (const k of ['runsDone', 'onTime', 'cancel', 'soldOut', 'noRun']) M[k] = (M[k] || 0) + (T[k] || 0); M.pax += T.pax; M.transfers += T.transfers; M.gaveUp += T.gaveUp; M.leftBehind += T.leftBehind; M.potential += T.potential;
-  M.revenue += T.revenue; M.opCost += T.cost - fixed; M.fixed += fixed; M.interest += interest; M.pso += pso; M.bought += T.bought; M.trainKm += T.trainKm;
+  M.revenue += T.revenue; M.opCost += T.cost - fixed - upkeep; M.fixed += fixed; M.upkeep = (M.upkeep || 0) + upkeep; M.interest += interest; M.pso += pso; M.bought += T.bought; M.trainKm += T.trainKm;
   if (sat != null) { M.satSum += sat; M.satDays++; }
   M.sold.push(...sold); M.negMax = Math.max(M.negMax, G.negDays);
   for (const r of G.routes) {
@@ -928,7 +945,7 @@ function closeDay() {
 // 월 결산 요약(달이 끝난 뒤 보여 주고 startMonth로 넘어감)
 function monthReport() {
   const M = G.mon;
-  const profit = M.revenue - M.opCost - M.fixed - M.interest + M.pso;
+  const profit = M.revenue - M.opCost - M.fixed - (M.upkeep || 0) - M.interest + M.pso;
   const routes = G.routes.map(r => ({ r, ...(r.mon || { pax: 0, rev: 0, cost: 0, left: 0 }) })).sort((a, b) => (b.rev - b.cost) - (a.rev - a.cost));
   return { ...M, profit, sat: M.satDays ? M.satSum / M.satDays : null, cover: M.potential ? M.pax / M.potential * 100 : 0,
     rep: G.rep, money: G.money, debt: G.debt, grade: creditGrade(), routes, date: dateOf(M.startDay) };
@@ -1030,7 +1047,7 @@ function routeDiag(r) {
 }
 
 // ───────────────────────── 조작 ─────────────────────────
-function trainValue(t) { const K = CFG.kinds[t.kind]; let v = K.price; for (let k = 1; k <= t.lvl; k++) v += K.levels[k].upgrade; return v; }
+function trainValue(t) { if (t.paid != null) return t.paid; const K = CFG.kinds[t.kind]; let v = K.basePrice; for (let k = 1; k <= t.lvl; k++) v += K.levels[k].baseUpgrade; return v; } // 예전에 산 열차는 예전 값
 const sellValue = t => Math.round(trainValue(t) * CFG.sellRatio);
 // 차량 번호(호차): 열차 종류별로 1호부터. 판 번호는 비워 두었다가 다음에 산 열차가 씀(가장 작은 빈 번호)
 function freeNo(kind) {
@@ -1046,7 +1063,7 @@ function buyTrain(kind, free = false) {
   const K = CFG.kinds[kind];
   if (!free) { const e = lvErr(needTrain(kind, 0)); if (e) return { err: `${K.levels[0].name}: ${e}` }; }
   if (!free) { if (G.money < K.price) return { err: '돈이 부족합니다' }; G.money -= K.price; G.today.bought += K.price; }
-  const t = { id: G.nextTrainId++, kind, lvl: 0, no: freeNo(kind) };
+  const t = { id: G.nextTrainId++, kind, lvl: 0, no: freeNo(kind), paid: free ? 0 : K.price };
   G.depot.push(t);
   return { t };
 }
@@ -1063,7 +1080,7 @@ function upgradeTrain(t) {
   const why = upgradeBlock(t); if (why) return { err: why };
   const c = CFG.kinds[t.kind].levels[t.lvl + 1].upgrade;
   if (G.money < c) return { err: '돈이 부족합니다' };
-  G.money -= c; G.today.bought += c; t.lvl++;
+  G.money -= c; G.today.bought += c; t.lvl++; if (t.paid != null) t.paid += c;
   if (G.trains.includes(t)) rebuildNetwork(); // 운행 중: 속도·정원이 바뀜 → 수요 다시 계산 (지금 달리는 구간은 다음 역부터 새 속도)
   return {};
 }
@@ -1156,7 +1173,7 @@ function setRouteStops(r, stops) {
 
 // 역·선로 구간 구입
 const r100k = x => Math.round(x / 100_000) * 100_000;
-function stationPrice(s) { return r100k(CFG.stationBase + s.on * CFG.stationPerRider); }
+function stationPrice(s) { return r100k((CFG.stationBase + s.on * CFG.stationPerRider) * infMul(s.region)); }
 function buyStation(s, free = false) {
   if (stOwned(s)) return { err: '이미 산 역입니다' };
   if (!isOpen(s)) return { err: '아직 열지 않은 지역의 역입니다' };
@@ -1171,7 +1188,7 @@ function sectionPrice(sec) {
   if (u.elec && !l.elec) per += CFG.elecPerKm;           // 이미 개량한 노선이면 이 구간 개량비도
   if (u.dbl && !l.dbl) per += CFG.dblPerKm;
   if (u.speed) per += u.speed / CFG.speedStep * CFG.speedPerKm * (l.kind === 'hs' ? CFG.speedHsMul : 1);
-  return Math.max(CFG.secMin, r100k(sec.km * per));
+  return Math.max(CFG.secMin, r100k(sec.km * per * infMul(sec.region)));
 }
 const secOwned = sec => G.ownedSecs.has(sec.id);
 function buySection(sec, free = false) {
@@ -1287,12 +1304,24 @@ function regionReachable(id) {
 // 선로 개량
 function openKm(l) { let s = 0; for (const e of l.edges) if (edgeOpen(e)) s += e.km; return s; }
 function ownedKm(l) { let s = 0; for (const sc of l.sections) if (secOwned(sc)) s += sc.km; return s; }
+// 공사비 = 구간마다 km × km당 단가 × 그 지역 물가
+function workCost(secs, what) {
+  const per = what === 'elec' ? CFG.elecPerKm : what === 'dbl' ? CFG.dblPerKm : CFG.speedPerKm * (secs[0]?.line.kind === 'hs' ? CFG.speedHsMul : 1);
+  return Math.round(secs.reduce((a, sc) => a + sc.km * per * infMul(sc.region), 0) / 100_000) * 100_000;
+}
 function upgradeCost(l, what) {
-  const km = ownedKm(l);
-  if (what === 'elec') return lineElec(l) ? null : Math.round(km * CFG.elecPerKm / 100_000) * 100_000;
-  if (what === 'dbl') return l.kind === 'hs' || lineDbl(l) ? null : Math.round(km * CFG.dblPerKm / 100_000) * 100_000;
-  if (what === 'speed') { const hs = l.kind === 'hs'; return lineVmax(l) + CFG.speedStep > (hs ? CFG.speedMaxHs : CFG.speedMax) ? null : Math.round(km * CFG.speedPerKm * (hs ? CFG.speedHsMul : 1) / 100_000) * 100_000; }
+  const own = l.sections.filter(secOwned);
+  if (what === 'elec') return lineElec(l) ? null : workCost(own, 'elec');
+  if (what === 'dbl') return l.kind === 'hs' || lineDbl(l) ? null : workCost(own, 'dbl');
+  if (what === 'speed') { const hs = l.kind === 'hs'; return lineVmax(l) + CFG.speedStep > (hs ? CFG.speedMaxHs : CFG.speedMax) ? null : workCost(own, 'speed'); }
   return null;
+}
+// 산 선로·역 하루 유지비
+function upkeepPerDay() {
+  let v = 0;
+  for (const id of G.ownedSecs) { const sc = secById.get(id); if (sc && (sc.line.country || 'kr') !== 'tunnel') v += sectionPrice(sc); }
+  for (const id of G.ownedSt) if (stations[id]) v += stationPrice(stations[id]);
+  return Math.round(v * CFG.price.upkeep);
 }
 function upgradeLine(l, what) {
   const c = upgradeCost(l, what);
@@ -1316,8 +1345,8 @@ function serialize() {
     nextRouteNo: G.nextRouteNo, nextTrainId: G.nextTrainId, history: G.history, tunnel: G.tunnel,
     mon: G.mon,
     routes: G.routes.map(r => ({ no: r.no, kind: r.kind, color: r.color, stops: r.stops, name: r.name, mon: r.mon, tt: r.tt, yest: r.yest, yestB: r.yestB, yestN: r.yestN, yestRev: r.yestRev, yestCost: r.yestCost })), // 어제 기록: 추천 열차 수용
-    trains: G.trains.map(t => ({ id: t.id, no: t.no, kind: t.kind, lvl: t.lvl, route: t.route.no, i: t.i, dir: t.dir })),
-    depot: G.depot.map(t => ({ id: t.id, no: t.no, kind: t.kind, lvl: t.lvl })),
+    trains: G.trains.map(t => ({ id: t.id, no: t.no, kind: t.kind, lvl: t.lvl, route: t.route.no, i: t.i, dir: t.dir, paid: t.paid })),
+    depot: G.depot.map(t => ({ id: t.id, no: t.no, kind: t.kind, lvl: t.lvl, paid: t.paid })),
   });
 }
 // 예전 열차 체계(일반: 무궁화·ITX-새마을·ITX-마음 / 고속: 이음·산천·청룡) → 지금 체계(완행·일반·고속 4단계)
@@ -1355,8 +1384,8 @@ function deserialize(s) {
   G.trains = [];
   for (const t of o.trains) {
     const r = G.routes.find(x => x.no === t.route);
-    if (r) G.trains.push({ id: t.id, no: t.no, kind: t.kind, lvl: t.lvl, route: r, i: Math.min(t.i, r.stops.length - 1), dir: t.dir, legT: 0, legDur: null, dwell: 0.5, pax: [] });
-    else G.depot.push({ id: t.id, no: t.no, kind: t.kind, lvl: t.lvl });
+    if (r) G.trains.push({ id: t.id, no: t.no, kind: t.kind, lvl: t.lvl, paid: t.paid, route: r, i: Math.min(t.i, r.stops.length - 1), dir: t.dir, legT: 0, legDur: null, dwell: 0.5, pax: [] });
+    else G.depot.push({ id: t.id, no: t.no, kind: t.kind, lvl: t.lvl, paid: t.paid });
   }
   G.depot = o.depot.map(t => ({ ...t })).concat(G.depot.filter(x => !o.depot.some(y => y.id === x.id)));
   numberTrains(); // 예전 저장: 번호 없는 열차에 종류별 번호
@@ -1379,7 +1408,7 @@ function setupNewGame() {
   rebuildNetwork();
 }
 
-root.SIM = { tunnelBlock, startTunnel, tunnelLine, ttNeed, recommendTT, TT_BANDS, NICE_HW, ttOf, depsOf, planTrains, oneWayMin, autoHw, ttBuild, layoutAll, respaceRoute, spacingRatio, get commuteTable() { return commuteTable; }, CFG, D, G, level, levelOf, levelNeed, needTrain, lvErr, resetGame, routeDiag, upgradeBlock, dateOf, isMonthEnd, monthReport, startMonth, assetValue, creditGrade, loanLimit, canBorrow, borrow, repay, stations, byName, lines, edges, adj, sections, secById, edgeOwned, stOwned, secOwned, stationPrice, buyStation,
+root.SIM = { priceMul, infMul, workCost, upkeepPerDay, levelGap, tunnelBlock, startTunnel, tunnelLine, ttNeed, recommendTT, TT_BANDS, NICE_HW, ttOf, depsOf, planTrains, oneWayMin, autoHw, ttBuild, layoutAll, respaceRoute, spacingRatio, get commuteTable() { return commuteTable; }, CFG, D, G, level, levelOf, levelNeed, needTrain, lvErr, resetGame, routeDiag, upgradeBlock, dateOf, isMonthEnd, monthReport, startMonth, assetValue, creditGrade, loanLimit, canBorrow, borrow, repay, stations, byName, lines, edges, adj, sections, secById, edgeOwned, stOwned, secOwned, stationPrice, buyStation,
   sectionPrice, buySection, missingSections, buySections, ownedKm, regionName, toKm, distKm, isOpen, lineElec, lineDbl, lineVmax, edgeOpen, edgeCap,
   kindOf, tierOf, needsElec, edgeAllowed, findPath, buildLegs, addRoute, routeTitle, routeKm, routeHasNonElec, routeOpen, routeTrains,
   legMinutes, edgeSpeed, cycleMinutes, headway, rideMinutes, rideKm, rebuildNetwork, planFrom, hourShare, peakAt, tick, satPct, closeDay, startNextDay,

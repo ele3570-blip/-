@@ -1036,7 +1036,7 @@ function renderTop() {
   $('cover').textContent = G.today.potential ? (G.today.pax / G.today.potential * 100).toFixed(1) + '%' : '-';
   const pk = S.peakAt(G.t), el = $('peak');
   el.style.display = pk ? '' : 'none'; if (pk) el.textContent = `${pk.icon} ${pk.name} 시간`;
-  const M = G.mon, mp = M.revenue - M.opCost - M.fixed - M.interest + M.pso + G.today.revenue - G.today.cost;
+  const M = G.mon, mp = M.revenue - M.opCost - M.fixed - (M.upkeep || 0) - M.interest + M.pso + G.today.revenue - G.today.cost;
   $('todayStat').textContent = `오늘 ${fmt(G.today.pax)}명 · 이번 달 ${fmt(M.pax + G.today.pax)}명 · 이번 달 손익 ${won(mp)}`;
 }
 function refreshAll() { assignSlots(); renderPanel(); renderInfo(); renderBadges(); renderTop(); save(); }
@@ -1123,8 +1123,8 @@ function planLink(a, b, kind) {
   const buySt = !S.stOwned(B);
   // 전철화비: 이 노선에서 (이미 산 + 이번에 살) 구간 km × km당 전철화비 (실제 공사와 같은 계산)
   const elecCost = elec.map(l => {
-    const km = S.ownedKm(l) + secs.filter(sc => sc.line === l).reduce((x, sc) => x + sc.km, 0);
-    return { line: l, km, cost: Math.round(km * CFG.elecPerKm / 100_000) * 100_000 };
+    const ss = [...l.sections.filter(S.secOwned), ...secs.filter(sc => sc.line === l)];
+    return { line: l, km: ss.reduce((x, sc) => x + sc.km, 0), cost: S.workCost(ss, 'elec') };
   });
   const cost = regions.reduce((x, rg) => x + CFG.unlockCost[rg], 0) + secs.reduce((x, sc) => x + S.sectionPrice(sc), 0) + (buySt ? S.stationPrice(B) : 0)
     + elecCost.reduce((x, e) => x + e.cost, 0);
@@ -1157,7 +1157,7 @@ function mergePlans(parts, b) {
     for (const e of x.elec || []) elecLines.add(e.line);
   }
   const sl = [...secs.values()], B = stations[b], buySt = !S.stOwned(B);
-  const elec = [...elecLines].map(l => { const km = S.ownedKm(l) + sl.filter(sc => sc.line === l).reduce((a, sc) => a + sc.km, 0); return { line: l, km, cost: Math.round(km * CFG.elecPerKm / 100_000) * 100_000 }; });
+  const elec = [...elecLines].map(l => { const ss = [...l.sections.filter(S.secOwned), ...sl.filter(sc => sc.line === l)]; return { line: l, km: ss.reduce((a, sc) => a + sc.km, 0), cost: S.workCost(ss, 'elec') }; });
   const cost = regions.reduce((a, rg) => a + CFG.unlockCost[rg], 0) + sl.reduce((a, sc) => a + S.sectionPrice(sc), 0) + (buySt ? S.stationPrice(B) : 0) + elec.reduce((a, e) => a + e.cost, 0);
   // 돌아가는 길 정보도 합침(어느 한쪽이라도 '사면 짧아지는' 경우)
   const detour = parts.some(x => x.detour) ? { km: parts.reduce((a, x) => a + (x.detour || x.path).km, 0) } : null;
@@ -1620,6 +1620,7 @@ function endDay() {
       <tr><td>운임 수입</td><td class="pos">+${won(M.revenue)}</td></tr>
       <tr><td>운행비 (${fmt(M.trainKm)}열차km)</td><td class="neg">-${won(M.opCost)}</td></tr>
       <tr><td>차량 고정비</td><td class="neg">-${won(M.fixed)}</td></tr>
+      <tr><td>선로·역 유지비</td><td class="neg">-${won(M.upkeep || 0)}</td></tr>
       ${M.interest ? `<tr><td>대출 이자</td><td class="neg">-${won(M.interest)}</td></tr>` : ''}
       <tr><td>공익서비스 보상금</td><td class="pos">+${won(M.pso)}</td></tr>
       <tr><td><b>영업 순이익</b></td><td class="${M.profit >= 0 ? 'pos' : 'neg'}"><b>${won(M.profit)}</b></td></tr>
