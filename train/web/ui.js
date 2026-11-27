@@ -712,6 +712,51 @@ function kindUpHtml(k) {
   }
   return out.length ? `<div class="btns" style="display:flex;flex-wrap:wrap;gap:4px;margin:6px 0">${out.join('')}</div>` : '';
 }
+// 모든 노선 열차 수를 추천대로: 남는 열차는 먼저 회수(차량기지로) → 같은 종류 노선에 다시 씀 → 그래도 모자라면 삼
+function planAllRec() {
+  const ch = [];
+  for (const r of G.routes) {
+    const n = S.routeTrains(r).length; if (!n || !S.routeOpen(r)) continue;
+    const x = S.routeDiag(r); if (x.rec == null || x.rec === n) continue;
+    ch.push({ r, n, want: x.rec });
+  }
+  const byKind = {};
+  for (const c of ch) { const k = byKind[c.r.kind] || (byKind[c.r.kind] = { add: 0, rem: 0, depot: G.depot.filter(t => t.kind === c.r.kind).length }); c.want > c.n ? k.add += c.want - c.n : k.rem += c.n - c.want; }
+  let add = 0, rem = 0, buy = 0, cost = 0;
+  for (const [k, v] of Object.entries(byKind)) { add += v.add; rem += v.rem; const b = Math.max(0, v.add - v.depot - v.rem); v.buy = b; buy += b; cost += b * CFG.kinds[k].price; }
+  return { ch, add, rem, buy, cost, byKind };
+}
+function allRecHtml() {
+  if (!G.routes.some(r => S.routeTrains(r).length)) return '';
+  const P = planAllRec();
+  if (!P.ch.length) return `<div class="btns" style="display:flex;margin-bottom:8px"><button disabled style="flex:1">🔄 모든 노선이 추천 열차 수대로입니다</button></div>`;
+  return `<div class="btns" style="display:flex;margin-bottom:8px"><button class="primary" data-allrec="1" style="flex:1" ${G.money < P.cost ? `title="돈이 ${won(P.cost - G.money)} 모자랍니다"` : ''}>🔄 열차 수 모두 추천으로 <span style="opacity:.85">(${P.ch.length}개 노선${P.add ? ` · +${P.add}대` : ''}${P.rem ? ` · −${P.rem}대` : ''} · ${P.buy ? `${P.buy}대 구입 ${won(P.cost)}` : '추가 비용 없음'})</span></button></div>`;
+}
+function applyAllRec() {
+  const P = planAllRec();
+  const lines = P.ch.map(c => `<div style="display:flex;gap:8px"><span style="flex:1">${CFG.kinds[c.r.kind].icon} ${esc(S.routeTitle(c.r))}</span><b>${c.n} → ${c.want}대</b> <span class="${c.want > c.n ? 'pos' : 'neg'}" style="width:42px;text-align:right">${c.want > c.n ? '+' : '−'}${Math.abs(c.want - c.n)}</span></div>`).join('');
+  const kinds = Object.entries(P.byKind).filter(([, v]) => v.buy).map(([k, v]) => `${CFG.kinds[k].levels[0].name} ${v.buy}대 × ${won(CFG.kinds[k].price)}`).join(', ');
+  showModal(`<h3 style="margin:0 0 6px">🔄 열차 수 모두 추천으로</h3>
+    <div style="max-height:45vh;overflow-y:auto;font-size:13px;line-height:1.7">${lines}</div>
+    <div class="slot" style="margin-top:8px;font-size:13px">늘리기 +${P.add}대 · 줄이기 −${P.rem}대 (줄인 열차는 차량기지로, 같은 종류 노선에 먼저 다시 씀)<br>
+      ${P.buy ? `새로 살 열차: ${kinds}<br><b>총 ${won(P.cost)}</b>${G.money < P.cost ? ` <span class="neg">(돈이 ${won(P.cost - G.money)} 모자라 살 수 있는 만큼만 삽니다)</span>` : ''}` : '<b>새로 살 열차 없음 (0원)</b>'}</div>
+    <div style="display:flex;gap:8px;margin-top:10px"><button id="askNo" style="flex:1">취소</button><button class="primary" id="askYes" style="flex:1">바꾸기</button></div>`);
+  $('askNo').onclick = hideModal;
+  $('askYes').onclick = () => {
+    hideModal(); let bought = 0, spent = 0, short = 0;
+    for (const c of P.ch) { let ts = S.routeTrains(c.r); while (ts.length > c.want) { S.recall(ts[ts.length - 1]); ts = S.routeTrains(c.r); } }
+    for (const c of P.ch) {
+      let ts = S.routeTrains(c.r);
+      while (ts.length < c.want) {
+        let t = G.depot.find(x => x.kind === c.r.kind && !S.canDispatch(x, c.r));
+        if (!t) { const res = S.buyTrain(c.r.kind); if (res.err) { short += c.want - ts.length; break; } t = res.t; bought++; spent += CFG.kinds[c.r.kind].price; }
+        if (S.dispatch(t, c.r).err) break; ts = S.routeTrains(c.r);
+      }
+    }
+    toast(`${P.ch.length}개 노선 열차 수를 바꿨습니다${bought ? ` · ${bought}대 구입 ${won(spent)}` : ''}${short ? ` · 돈이 모자라 ${short}대 못 넣음` : ''}`, short ? '#b45309' : '#15803d');
+    refreshAll();
+  };
+}
 function renderRoutes() {
   $('newRouteBtns').innerHTML = Object.entries(CFG.kinds).map(([k, K]) => { const need = S.needTrain(k, 0);
     return `<button data-newroute="${k}" ${lvLocked(need) ? 'disabled' : ''}>${lvLocked(need) ? lockTag(need) : K.icon} 새 ${K.name}<br><span class="muted">${k === 'local' ? '일반선(모든 선로)' : k === 'general' ? '일반선(누리로부터 전철화)' : k === 'metro' ? '전철화 선로' : S.level() < CFG.gate.hs ? `전철화 선로(고속선 Lv${CFG.gate.hs})` : '고속선·전철화 선로'}</span></button>`; }).join('');
@@ -722,7 +767,7 @@ function renderRoutes() {
       <span class="nm"><b>${esc(S.routeTitle(r))}</b> <span style="font-size:12px">${(d => `${d.icon} ${d.label}`)(S.routeDiag(r))}</span><br>
       <span class="meta">${fmt(S.routeKm(r))}km ${trackTags(r)} · ${r.stops.length}역 · 열차 ${ts.length}대 · 오늘 ${fmt(r.paxToday || 0)}명 · <span class="${p >= 0 ? 'pos' : 'neg'}">${won(p)}</span></span></span></div>`;
   };
-  $('routes').innerHTML = Object.entries(CFG.kinds).map(([k, K]) => {
+  $('routes').innerHTML = allRecHtml() + Object.entries(CFG.kinds).map(([k, K]) => {
     const rs = G.routes.filter(r => r.kind === k);
     if (!rs.length) return '';
     const pax = rs.reduce((a, r) => a + (r.paxToday || 0), 0), p = rs.reduce((a, r) => a + (r.revToday || 0) - (r.costToday || 0), 0);
@@ -1445,6 +1490,7 @@ document.addEventListener('click', e => {
     if (err) toast(err); else toast(`${S.routeTitle(r)}: ${CFG.kinds[r.kind].levels[L].name}(으)로 올렸습니다`, '#15803d');
     refreshAll();
   }
+  else if (d.allrec) applyAllRec();
   else if (d.setn) {
     const [no, want] = d.setn.split(':').map(Number), r = findR(no);
     let ts = S.routeTrains(r), added = 0, bought = 0;
