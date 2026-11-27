@@ -61,7 +61,7 @@ LINES = [
     ('gyeongjeon_w', '경전선(순천~광주송정)', 'conv', False, False, 100,
      '순천 벌교 조성 예당 득량 보성 명봉 이양 능주 화순 효천 서광주 광주송정'),
     ('namhae', '남해선', 'conv', True, False, 150, '임성리 영암 해남 강진 전남장흥 장동 신보성 보성'),
-    ('gyeongui', '경의선', 'conv', True, True, 120, '서울 행신 대곡'),
+    ('gyeongui', '경의선', 'conv', True, True, 120, '서울 행신 대곡 임진강 도라산'),  # 도라산에서 북한 평부선으로
     ('gyooe', '교외선', 'conv', False, False, 80, '대곡 원릉 일영 장흥 송추 의정부'),
     ('gyeongwon', '경원선', 'conv', True, True, 100, '청량리 의정부 동두천'),
     ('gyeongchun', '경춘선', 'conv', True, True, 180, '상봉 춘천'),
@@ -138,6 +138,33 @@ def locate(x, y, feats):
                 d = (q[0] - x) ** 2 + (q[1] - y) ** 2
                 if d < bd: best, bd = f['properties'], d
     return best
+
+
+import nk_data as NK
+_nkc = json.load(open(os.path.join(RAW, 'nk_stations.json'), encoding='utf-8'))
+
+
+def _nk_names():
+    """북한 역: OSM 이름 → 게임 이름(남한 역과 겹치면 '(북)')"""
+    sk = set()
+    for *_x, seq in LINES: sk.update(seq.split())
+    out = {}
+    for *_x, seq in NK.NK_LINES:
+        for s in seq.split():
+            if s not in _nkc: out[s] = s; continue  # 도라산(남한 역)
+            n = NK.RENAME.get(s, s)
+            out[s] = n + '(북)' if n in sk else n
+    return out
+
+
+NK_NAME = _nk_names()
+NK_LINES = [(lid, nm, k, e, d, v, ' '.join(NK_NAME[x] for x in seq.split())) for lid, nm, k, e, d, v, seq in NK.NK_LINES]
+NK_COORD = {NK_NAME[k]: tuple(v) for k, v in _nkc.items()}
+ALL_LINES = LINES + NK_LINES
+
+
+def all_coords():
+    c = dict(station_coords()); c.update(NK_COORD); return c
 
 
 def used_stations():
@@ -233,9 +260,25 @@ def main():
                          'ktx': round(min(1, ktx.get(s, 0) / on), 2) if on else 0,
                          'region': reg, 'si': si})
 
+    # 북한 역: 도(ADM1) 경계로 지역, 승차는 인구로 추정
+    adm = json.load(open(os.path.join(RAW, 'prk_adm1.geojson'), encoding='utf-8'))['features']
+    adm_region = {n: rid_ for rid_, _, ns in NK.NK_REGIONS for n in ns}
+    osm_of = {v: k for k, v in NK_NAME.items()}
+    for *_x, seq in NK_LINES:
+        for s in seq.split():
+            if s in idx: continue
+            lon, lat = NK_COORD[s]
+            pr = locate(lon, lat, adm)
+            pop = NK.POP.get(osm_of[s])
+            on = round(pop * NK.RIDE_RATE) if pop else NK.SMALL
+            idx[s] = len(stations)
+            stations.append({'name': s, 'lon': round(lon, 5), 'lat': round(lat, 5), 'on': on, 'off': on, 'ktx': 0,
+                             'region': adm_region[pr['shapeName']], 'si': '', 'est': 1})
+            coord[s] = (lon, lat)
+
     # 검사: 이웃 역이 너무 멀거나 지그재그면 알림
     lines_out = []
-    for lid, name, kind, elec, dbl, vmax, seq in LINES:
+    for lid, name, kind, elec, dbl, vmax, seq in ALL_LINES:
         ss = seq.split()
         segs, geo = [], []
         for a, b in zip(ss, ss[1:]):
@@ -258,7 +301,12 @@ def main():
             if len(ring) < 8: continue
             land.append([[round(q[0], 3), round(q[1], 3)] for q in ring[::2]])
 
-    regions = [{'id': r, 'name': n} for r, n, _ in REGIONS]
+    for f in adm:  # 북한 도 경계
+        for p in polys(f['geometry']):
+            ring = p[0]
+            if len(ring) < 8: continue
+            land.append([[round(q[0], 3), round(q[1], 3)] for q in ring[::2]])
+    regions = [{'id': r, 'name': n} for r, n, _ in REGIONS] + [{'id': r, 'name': n, 'nk': 1} for r, n, _ in NK.NK_REGIONS]
     # 지도에 칠할 지역 모양: 시군구 경계를 지역별로 합침(shapely 필요. 없으면 생략)
     try:
         from shapely.geometry import shape, mapping
@@ -267,6 +315,8 @@ def main():
         for f in muni:
             rg = muni_region(f['properties'])
             if rg: parts.setdefault(rg, []).append(shape(f['geometry']).buffer(0))
+        for f in adm:
+            parts.setdefault(adm_region[f['properties']['shapeName']], []).append(shape(f['geometry']).buffer(0))
         for r in regions:
             g = unary_union(parts.get(r['id'], [])).buffer(0.002).buffer(-0.002).simplify(0.004)
             polys_ = list(g.geoms) if g.geom_type == 'MultiPolygon' else [g]
@@ -284,7 +334,7 @@ def main():
         print(f"  {r['name']}: 역 {len(ss)}, 하루 승차 {sum(s['on'] for s in ss):,}", file=sys.stderr)
 
     data = {'stations': stations, 'lines': lines_out, 'regions': regions, 'land': land,
-            'source': '한국철도공사 역별 승하차 현황(2025), KTX 역별 승하차(2023), 선로 © OpenStreetMap 기여자(ODbL)'}
+            'source': '한국철도공사 역별 승하차 현황(2025), KTX 역별 승하차(2023), 선로 © OpenStreetMap 기여자(ODbL), 북한 도 경계 geoBoundaries(WFP·OCHA ROAP, CC BY 3.0 IGO), 북한 승차는 인구로 추정'}
     with open(OUT, 'w', encoding='utf-8') as f:
         f.write('window.GAME_DATA = ' + json.dumps(data, ensure_ascii=False, separators=(',', ':')) + ';\n')
     print(f'→ {OUT} ({os.path.getsize(OUT):,} bytes)', file=sys.stderr)

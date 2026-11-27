@@ -82,16 +82,17 @@ const CFG = {
     { need: 200_000_000_000,      desc: 'KTX(전철화된 일반선만) · ITX-새마을' },
     { need: 500_000_000_000,      desc: '고속선 구간 구입 · KTX-산천' },
     { need: 1_000_000_000_000,    desc: '수도권 지역 · KTX-이음' },
-    { need: 2_500_000_000_000,    desc: 'ITX-마음 · 고속화 공사 · 강원 지역' },
-    { need: 5_000_000_000_000,    desc: '광역전철 8량 · 전북 지역' },
-    { need: 11_000_000_000_000,   desc: '광주·전남 지역' },
-    { need: 23_000_000_000_000,   desc: 'KTX-청룡' },
+    { need: 2_500_000_000_000,    desc: 'ITX-마음 · 고속화 공사 · 강원 지역 · 북한 개성·황해' },
+    { need: 5_000_000_000_000,    desc: '광역전철 8량 · 전북 지역 · 북한 평양·평남' },
+    { need: 11_000_000_000_000,   desc: '광주·전남 지역 · 북한 평북·자강, 강원·함남' },
+    { need: 23_000_000_000_000,   desc: 'KTX-청룡 · 북한 함북·양강' },
   ],
   // 필요한 레벨(1부터). 열차는 '종류:등급'
   gate: {
     train: { 'local:0': 1, 'local:1': 3, 'local:2': 6, 'general:0': 6, 'general:1': 7, 'general:2': 9, 'general:3': 12,
              'metro:0': 1, 'metro:1': 7, 'metro:2': 13, 'ktx:0': 9, 'ktx:1': 10, 'ktx:2': 11, 'ktx:3': 15 },
-    region: { daegu: 1, gyeongbuk_n: 2, gyeongbuk_e: 3, gyeongnam: 4, busan: 5, chungbuk: 7, chungcheong: 8, capital: 11, gangwon: 12, jeonbuk: 13, jeonnam: 14 },
+    region: { daegu: 1, gyeongbuk_n: 2, gyeongbuk_e: 3, gyeongnam: 4, busan: 5, chungbuk: 7, chungcheong: 8, capital: 11, gangwon: 12, jeonbuk: 13, jeonnam: 14,
+              nk_hwanghae: 12, nk_pyongyang: 13, nk_pyongbuk: 14, nk_east: 14, nk_north: 15 }, // 북한: 수도권(경의선 도라산)에서 개성으로
     work: { elec: 6, dbl: 7, speed: 12 },
     hs: 10,
   },
@@ -111,7 +112,8 @@ const CFG = {
   // 지역을 연 뒤에도 쓰려는 선로 구간과 역을 따로 사야 함
   unlockCost: { gyeongbuk_e: 8_000_000, gyeongbuk_n: 5_000_000, busan: 15_000_000, gyeongnam: 8_000_000,
                 chungcheong: 40_000_000, chungbuk: 20_000_000, capital: 120_000_000, gangwon: 30_000_000,
-                jeonbuk: 30_000_000, jeonnam: 40_000_000 },
+                jeonbuk: 30_000_000, jeonnam: 40_000_000,
+                nk_hwanghae: 50_000_000, nk_pyongyang: 150_000_000, nk_pyongbuk: 60_000_000, nk_east: 80_000_000, nk_north: 80_000_000 },
   // 선로 구간(노선 × 지역) 가격 = km × 단가. 개량을 마친 노선이면 개량비도 함께
   secPerKm: { conv: 60_000, hs: 150_000 }, secMin: 500_000,
   // 역 가격 = 기본 + 실제 하루 승차 × 단가 (10만원 단위)

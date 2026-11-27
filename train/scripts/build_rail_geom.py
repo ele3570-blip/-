@@ -2,7 +2,8 @@
 
 사용법: python3 train/scripts/build_rail_geom.py <export.geojson>
 
-export.geojson 은 overpass-turbo.eu 에서 아래 쿼리로 받은 파일(railway=rail 본선·지선·고속선):
+export.geojson 은 overpass-turbo.eu 에서 아래 쿼리로 받은 파일(railway=rail 본선·지선·고속선).
+북한: ISO3166-1="KP" 로 받은 파일과 --only=pyongbu,pyongui,... (nk_data.py 노선 id) 로 북한 노선만 합침:
   [out:json][timeout:300];
   area["ISO3166-1"="KR"][admin_level=2]->.kr;
   ( way["railway"="rail"]["usage"~"main|branch"](area.kr);
@@ -32,6 +33,10 @@ OSM_NAMES = {
     'samcheok': ['삼척선'], 'donghae_s': ['동해선'], 'donghae_n': ['동해선'], 'bujeon': ['가야선'],
     'gyeongjeon_e': ['경전선'], 'gyeongjeon_m': ['경전선'], 'gyeongjeon_w': ['경전선'], 'namhae': ['목포보성선'],
     'gyeongui': ['경의선'], 'gyooe': ['교외선'], 'gyeongwon': ['경원선'], 'gyeongchun': ['경춘선'],
+    # 북한(nk_data.py)
+    'pyongbu': ['평부선'], 'pyongui': ['평의선'], 'pyongra': ['평라선'], 'gangwon_n': ['강원선'], 'geumgang': ['금강산청년선'],
+    'manpo': ['만포선'], 'hambuk': ['함북선'], 'baekdu': ['백두산청년선'], 'pyongnam': ['평남선'], 'hwanghae': ['황해청년선'],
+    'pyongdeok': ['평덕선'],
 }
 OTHER_PENALTY = 3.0   # 다른 이름 선로를 지날 때 길이 배율
 SNAP_KM = 2.0         # 역에서 이 안의 선로 점에 붙임
@@ -67,6 +72,8 @@ def simplify(pts, tol):
 
 def main():
     if len(sys.argv) < 2: sys.exit(__doc__)
+    # --only=id,id : 그 노선만 다시 만들어 기존 결과에 합침(예: 북한 GeoJSON으로 북한 노선만)
+    only = next((a.split('=', 1)[1].split(',') for a in sys.argv[2:] if a.startswith('--only=')), None)
     feats = json.load(open(sys.argv[1], encoding='utf-8'))['features']
     # 그래프: 점 id ← 좌표(소수 7자리)
     pid, coords = {}, []
@@ -143,9 +150,12 @@ def main():
         return None, None
 
     # 역 좌표(build_train_data 와 같은 방법)
-    coord = B.station_coords()
+    coord = B.all_coords()
     out, bad = {}, []
-    for lid, lname, kind, *_rest, seq in B.LINES:
+    if only and os.path.exists(OUT):
+        out = {k: v for k, v in json.load(open(OUT, encoding='utf-8')).items() if k.split('|')[0] not in only}
+    for lid, lname, kind, *_rest, seq in B.ALL_LINES:
+        if only and lid not in only: continue
         names = OSM_NAMES.get(lid, [lname])
         ss = seq.split()
         for a, b in zip(ss, ss[1:]):

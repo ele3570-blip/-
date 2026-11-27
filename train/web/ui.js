@@ -100,9 +100,11 @@ const TRACK = {
 const trackType = e => e.line.kind === 'hs' ? 'hs' : S.lineElec(e.line) ? 'elec' : 'diesel';
 // 지역 모양(km 좌표)과 색. 열린 지역은 지역마다 다른 옅은 색, 닫힌 지역은 회색 빗금
 const REGION_COLOR = { daegu: '#fde2e4', gyeongbuk_e: '#fff1c1', gyeongbuk_n: '#e2f0cb', busan: '#cde7f0', gyeongnam: '#d8f3dc',
-  chungcheong: '#ffe5d0', chungbuk: '#e4dcf5', capital: '#fbd6e8', gangwon: '#d3f0e8', jeonbuk: '#f6eac2', jeonnam: '#dbe7fb' };
+  chungcheong: '#ffe5d0', chungbuk: '#e4dcf5', capital: '#fbd6e8', gangwon: '#d3f0e8', jeonbuk: '#f6eac2', jeonnam: '#dbe7fb',
+  nk_hwanghae: '#e9f5d0', nk_pyongyang: '#fde0d2', nk_pyongbuk: '#d9ecf7', nk_east: '#efe0f7', nk_north: '#fff0d6' };
 const REGION_INK = { daegu: '#be123c', gyeongbuk_e: '#a16207', gyeongbuk_n: '#4d7c0f', busan: '#0e7490', gyeongnam: '#15803d',
-  chungcheong: '#c2410c', chungbuk: '#6d28d9', capital: '#be185d', gangwon: '#0f766e', jeonbuk: '#a16207', jeonnam: '#1d4ed8' };
+  chungcheong: '#c2410c', chungbuk: '#6d28d9', capital: '#be185d', gangwon: '#0f766e', jeonbuk: '#a16207', jeonnam: '#1d4ed8',
+  nk_hwanghae: '#4d7c0f', nk_pyongyang: '#c2410c', nk_pyongbuk: '#0369a1', nk_east: '#7e22ce', nk_north: '#b45309' };
 const regionShapes = S.D.regions.filter(r => r.shape).map(r => ({ id: r.id, name: r.name,
   rings: r.shape.map(ring => ring.map(([lon, lat]) => S.toKm(lon, lat))), label: S.toKm(...r.label) }));
 const hatch = (() => {
@@ -426,7 +428,7 @@ function stationHtml(s) {
   const rs = S.servedBy.get(s.id) || [];
   const T = S.destTable.get(s.id);
   let h = `<div><b style="font-size:15px">${esc(s.name)}역</b> <span class="tag">${tierOfStation(s).name}</span> <span class="tag gray">${esc(S.regionName[s.region])}</span> ${open ? '' : '<span class="tag warn">미개방</span>'}</div>
-    <div class="muted">${esc(s.si)} · 실제 하루 승차 ${fmt(s.on)}명 · 하차 ${fmt(s.off)}명${s.ktx ? ` · KTX ${Math.round(s.ktx * 100)}%` : ''}</div>`;
+    <div class="muted">${s.est ? '북한 · 하루 승차 <b>추정</b>(도시 인구로)' : esc(s.si) + ' · 실제 하루 승차'} ${fmt(s.on)}명 · 하차 ${fmt(s.off)}명${s.ktx ? ` · KTX ${Math.round(s.ktx * 100)}%` : ''}</div>`;
   if (open && !S.stOwned(s)) h += `<div style="margin-top:6px"><button class="primary" data-buyst="${s.id}" ${G.money < S.stationPrice(s) ? 'disabled' : ''}>🏷 역 사기 ${won(S.stationPrice(s))}</button> <span class="muted">사야 열차를 세울 수 있습니다</span></div>`;
   if (open) {
     h += `<div style="margin-top:6px">🧍 기다리는 승객 <b>${fmt(q.length)}</b>명 · 지나는 노선 ${rs.length}개${T ? ` · 이어진 수요 ${Math.round(T.served * 100)}%` : ''}</div>`;
