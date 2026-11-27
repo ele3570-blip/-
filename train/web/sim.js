@@ -119,32 +119,39 @@ const CFG = {
     { need: 1_300_000_000_000, desc: '북한 평북·자강 · 강원·함남 지역' },
     { need: 1_800_000_000_000, desc: '광주·전남 지역' },
     { need: 2_400_000_000_000, desc: '북한 함북·양강 지역' },
-    { need: 3_200_000_000_000, desc: '중국 국경 개방(신의주–단둥, 남양–투먼) · 중국 열차' },
-    { need: 4_500_000_000_000, desc: '한일 해저터널 공사(1조원 · 1년) → 일본 · 신칸센 등 일본 열차' },
-    { need: 6_000_000_000_000, desc: 'KTX-청룡' },
+    { need: 3_200_000_000_000, desc: '중국 국경 개방(신의주–단둥, 남양–투먼) · 중국 동북 지역 · 중국 열차' },
+    { need: 3_800_000_000_000, desc: '중국 화북 지역(베이징·톈진·산둥) · T열차 · CRH380A' },
+    { need: 4_500_000_000_000, desc: '중국 화동·화중 지역(상하이·난징·우한)' },
+    { need: 5_300_000_000_000, desc: '중국 화남·서북·서남 지역(광저우·홍콩·시안·청두) · Z열차 · CR400AF' },
+    { need: 6_200_000_000_000, desc: '한일 해저터널 공사(1조원 · 1년) → 일본 규슈 지역 · 일본 열차' },
+    { need: 7_200_000_000_000, desc: '일본 주고쿠·시코쿠 지역 · 113 시리즈 · 783 시리즈 · 100 시리즈' },
+    { need: 8_300_000_000_000, desc: '일본 간사이 지역 · 885 시리즈 · CR450' },
+    { need: 9_500_000_000_000, desc: '일본 주부·간토 지역 · 223 시리즈 · 271 시리즈 · 300 시리즈' },
+    { need: 10_800_000_000_000, desc: '일본 도호쿠·홋카이도 지역 · N700S' },
+    { need: 12_500_000_000_000, desc: 'KTX-청룡' },
   ],
   // 필요한 레벨(1부터). 열차는 '종류:등급'
   gate: {
     train: { 'local:0': 1, 'local:1': 3, 'local:2': 6, 'general:0': 6, 'general:1': 7, 'general:2': 9, 'general:3': 13,
-             'metro:0': 1, 'metro:1': 7, 'metro:2': 15, 'ktx:0': 9, 'ktx:1': 10, 'ktx:2': 11, 'ktx:3': 21,
-             'cn_local:0': 19, 'cn_local:1': 19, 'cn_local:2': 20,
-             'cn_hs:0': 19, 'cn_hs:1': 19, 'cn_hs:2': 20, 'cn_hs:3': 21,
-             'jp_local:0': 20, 'jp_local:1': 20, 'jp_local:2': 21, 'jp_ltd:0': 20, 'jp_ltd:1': 20, 'jp_ltd:2': 21, 'jp_ltd:3': 21,
-             'shinkansen:0': 20, 'shinkansen:1': 20, 'shinkansen:2': 21, 'shinkansen:3': 21 },
+             'metro:0': 1, 'metro:1': 7, 'metro:2': 15, 'ktx:0': 9, 'ktx:1': 10, 'ktx:2': 11, 'ktx:3': 28,
+             'cn_local:0': 19, 'cn_local:1': 20, 'cn_local:2': 22,
+             'cn_hs:0': 19, 'cn_hs:1': 20, 'cn_hs:2': 22, 'cn_hs:3': 25,
+             'jp_local:0': 23, 'jp_local:1': 24, 'jp_local:2': 26, 'jp_ltd:0': 23, 'jp_ltd:1': 24, 'jp_ltd:2': 25, 'jp_ltd:3': 26,
+             'shinkansen:0': 23, 'shinkansen:1': 24, 'shinkansen:2': 26, 'shinkansen:3': 27 },
     region: { daegu: 1, gyeongbuk_n: 2, gyeongbuk_e: 3, gyeongnam: 4, busan: 5, chungbuk: 7, chungcheong: 8, capital: 11, gangwon: 13, jeonbuk: 15, jeonnam: 17,
               nk_hwanghae: 12, nk_pyongyang: 14, nk_pyongbuk: 16, nk_east: 16, nk_north: 18,
-              cn_dongbei: 19, cn_huabei: 19, cn_huadong: 19, cn_huazhong: 19, cn_huanan: 19, cn_xibei: 19, cn_xinan: 19, // 중국: 국경(신의주·남양)에서 동북부터
-              jp_kyushu: 20, jp_chugoku: 20, jp_shikoku: 20, jp_kansai: 20, jp_chubu: 20, jp_kanto: 20, jp_tohoku: 20, jp_hokkaido: 20 }, // 일본: 해저터널 개통 뒤 규슈부터 이어진 순서로 // 북한: 수도권(경의선 도라산)에서 개성으로
+              cn_dongbei: 19, cn_huabei: 20, cn_huadong: 21, cn_huazhong: 21, cn_huanan: 22, cn_xibei: 22, cn_xinan: 22, // 중국: 국경(신의주·남양)에서 동북부터
+              jp_kyushu: 23, jp_chugoku: 24, jp_shikoku: 24, jp_kansai: 25, jp_chubu: 26, jp_kanto: 26, jp_tohoku: 27, jp_hokkaido: 27 }, // 일본: 해저터널 개통 뒤 규슈부터 이어진 순서로 // 북한: 수도권(경의선 도라산)에서 개성으로
     work: { elec: 6, dbl: 7, speed: 13 },
     hs: 10,
-    tunnel: 20, // 한일 해저터널 공사
+    tunnel: 23, // 한일 해저터널 공사
   },
   tunnel: { cost: 1_000_000_000_000, days: 365 },
   // 물가: 늦게 열리는 것일수록 비쌈. 배율 = (그 레벨에서 다음 레벨까지 필요한 수입 ÷ Lv1의 것) ^ 지수
   // 선로·역·공사는 지수 infExp, 열차·등급 올리기는 trainExp(열차 1대가 버는 돈은 레벨이 올라도 크게 늘지 않아서 덜 오름)
   // upkeep: 산 선로·역의 하루 유지비 = 지금 값 × 비율
   price: { infExp: 0.85, trainExp: 0.5, trainMax: 30, upkeep: 0.0005, regionMul: { cn: 0.4 } }, // 중국은 공사비가 싸서 선로·역 × 0.4 // 열차 배율은 최대 30배(1대가 버는 돈으로 몇 달 안에 갚을 수 있게)
-  loanLevelMul: [0.5, 0.59, 0.68, 0.77, 0.86, 0.95, 1.04, 1.13, 1.22, 1.31, 1.4, 1.49, 1.58, 1.67, 1.76, 1.85, 1.94, 2.03, 2.12, 2.21, 2.3], // 대출 한도 × 레벨 배율
+  loanLevelMul: [0.5, 0.57, 0.63, 0.7, 0.77, 0.83, 0.9, 0.97, 1.03, 1.1, 1.17, 1.23, 1.3, 1.37, 1.43, 1.5, 1.57, 1.63, 1.7, 1.77, 1.83, 1.9, 1.97, 2.03, 2.1, 2.17, 2.23, 2.3], // 대출 한도 × 레벨 배율
   startDate: [2026, 1, 1], // 1일째 = 2026년 1월 1일. 실제 달력(달마다 28~31일), 달이 끝나면 월 결산
   // 은행 대출. 한도 = (기본 + 자산 × 비율) × 등급 배율, 이자는 하루 결산 때 남은 빚 × 하루 이자율
   loan: {
@@ -164,8 +171,8 @@ const CFG = {
                 jeonbuk: 40_000_000_000, jeonnam: 60_000_000_000,
                 nk_hwanghae: 50_000_000_000, nk_pyongyang: 100_000_000_000, nk_pyongbuk: 100_000_000_000, nk_east: 100_000_000_000, nk_north: 150_000_000_000,
                 jp_kyushu: 200_000_000_000, jp_chugoku: 300_000_000_000, jp_shikoku: 100_000_000_000, jp_kansai: 500_000_000_000,
-                jp_chubu: 700_000_000_000, jp_kanto: 1_000_000_000_000, jp_tohoku: 500_000_000_000, jp_hokkaido: 300_000_000_000,
-                cn_dongbei: 100_000_000_000, cn_huabei: 200_000_000_000, cn_huadong: 250_000_000_000, cn_huazhong: 250_000_000_000,
+                jp_chubu: 300_000_000_000, jp_kanto: 500_000_000_000, jp_tohoku: 500_000_000_000, jp_hokkaido: 300_000_000_000,
+                cn_dongbei: 100_000_000_000, cn_huabei: 200_000_000_000, cn_huadong: 200_000_000_000, cn_huazhong: 200_000_000_000,
                 cn_huanan: 200_000_000_000, cn_xibei: 150_000_000_000, cn_xinan: 150_000_000_000 },
   // 선로 구간(노선 × 지역) 가격 = km × 단가. 개량을 마친 노선이면 개량비도 함께
   secPerKm: { conv: 60_000, hs: 150_000 }, secMin: 500_000,
