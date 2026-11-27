@@ -277,7 +277,7 @@ function draw() {
       if (!open) {
         const need = regionLv(r.id), c = CFG.unlockCost[r.id], reach = S.regionReachable(r.id), ok = reach && G.money >= c && !lvLocked(need);
         const t2 = c == null ? (G.tunnel ? `🚧 공사 중 · ${G.tunnel.end - G.day}일 남음` : `회사 레벨 ${CFG.gate.tunnel} · 공사 ${won(CFG.tunnel.cost)}`)
-          : lvLocked(need) ? `회사 레벨 ${need} 필요 · ${won(c)}` : r.id.startsWith('jp_') && !G.tunnel?.done ? `해저터널 개통 뒤 · ${won(c)}`
+          : lvLocked(need) ? `회사 레벨 ${need} 필요 · ${won(c)}` : S.licenseOf(r.id) && !G.licenses.has(S.licenseOf(r.id)) ? `사업권 필요 · ${won(c)}` : r.id.startsWith('jp_') && !G.tunnel?.done ? `해저터널 개통 뒤 · ${won(c)}`
           : `${won(c)}${reach ? (ok ? ' · 열 수 있음' : '') : ' · 이어진 지역 먼저'}`;
         ctx.font = '700 12px "Pretendard","Apple SD Gothic Neo","Noto Sans KR",sans-serif';
         const w = ctx.measureText(t2).width + 14;
@@ -772,7 +772,8 @@ function renderRoutes() {
     const d = { local: '일반선(모든 선로)', general: '일반선(누리로부터 전철화)', metro: '전철화 선로', ktx: S.level() < CFG.gate.hs ? `전철화 선로(고속선 Lv${CFG.gate.hs})` : '고속선·전철화 선로·해저터널',
       jp_local: '일본 재래선', jp_ltd: '일본 재래선(전철화)', shinkansen: '일본 신칸센 선로·해저터널',
       cn_local: '중국 선로(운임 쌈)', cn_hs: '중국 고속선·국경' }[k] || '';
-    return `<button data-newroute="${k}" ${lvLocked(need) ? 'disabled' : ''}>${lvLocked(need) ? lockTag(need) : K.icon} 새 ${K.name}<br><span class="muted">${d}</span></button>`; }).join('');
+    const noLic = CFG.license[K.country] && !G.licenses.has(K.country);
+    return `<button data-newroute="${k}" ${lvLocked(need) || noLic ? 'disabled' : ''}>${lvLocked(need) ? lockTag(need) : noLic ? '🔒 사업권' : K.icon} 새 ${K.name}<br><span class="muted">${d}</span></button>`; }).join('');
   // 열차 종류별로 묶음(일반 · 광역 · 고속). 머리줄을 누르면 접기/펴기
   const card = r => {
     const ts = S.routeTrains(r), p = (r.revToday || 0) - (r.costToday || 0);
@@ -816,7 +817,7 @@ function renderDepot() {
     const rs = G.routes.filter(r => r.kind === k);
     return rs.length ? `<optgroup label="${K.icon} ${K.name}">${rs.map(r => `<option value="${r.no}" ${r.no === depotRouteNo ? 'selected' : ''}>${esc(S.routeTitle(r))}</option>`).join('')}</optgroup>` : '';
   }).join('');
-  $('buyTrain').innerHTML = `<button data-tiers="1" style="grid-column:1/-1">📊 열차 등급표 (속도·정원·비용)</button>` + Object.entries(CFG.kinds).map(([k, K]) => { const need = S.needTrain(k, 0); return `<button data-buy="${k}" ${G.money < K.price || lvLocked(need) ? 'disabled' : ''}>${lvLocked(need) ? lockTag(need) : K.icon} ${K.levels[0].name}<br><b>${won(K.price)}</b><br><span class="muted">${K.levels[0].cars}량 ${K.levels[0].cap}명 · ${K.levels[0].vmax}km/h</span></button>`; }).join('');
+  $('buyTrain').innerHTML = `<button data-tiers="1" style="grid-column:1/-1">📊 열차 등급표 (속도·정원·비용)</button>` + Object.entries(CFG.kinds).map(([k, K]) => { const need = S.needTrain(k, 0), noLic = CFG.license[K.country] && !G.licenses.has(K.country); return `<button data-buy="${k}" ${G.money < K.price || lvLocked(need) || noLic ? 'disabled' : ''}>${lvLocked(need) ? lockTag(need) : noLic ? '🔒 사업권' : K.icon} ${K.levels[0].name}<br><b>${won(K.price)}</b><br><span class="muted">${K.levels[0].cars}량 ${K.levels[0].cap}명 · ${K.levels[0].vmax}km/h</span></button>`; }).join('');
   const r = G.routes.find(x => x.no === depotRouteNo);
   const waitCard = t => {
     const L = CFG.kinds[t.kind].levels, nx = L[t.lvl + 1], tier = S.tierOf(t);
@@ -873,6 +874,12 @@ function upBtn(t) {
   const why = S.upgradeBlock(t);
   return `<button data-up="${t.id}" ${why || G.money < nx.upgrade ? 'disabled' : ''} title="${esc(why || '')}">⬆ ${nx.name} (${won(nx.upgrade)})</button>${why ? `<span class="muted" style="font-size:11px;flex-basis:100%">${esc(why)}</span>` : ''}`;
 }
+function licenseHtml(c) {
+  const L = CFG.license[c], own = G.licenses.has(c), why = S.licenseBlock(c);
+  const body = own ? '<span class="tag ok">보유</span>' : lvLocked(L.gate) ? `<button disabled>${lockTag(L.gate)} ${won(L.cost)}</button>`
+    : `<button class="primary" data-license="${c}" ${why ? `disabled title="${esc(why)}"` : ''}>사업권 사기 ${won(L.cost)}</button>`;
+  return `<div class="wbox" style="margin-bottom:8px;display:flex;align-items:center;gap:8px"><div style="flex:1"><b>${L.icon} ${L.name}</b><br><span class="muted" style="font-size:12px">사야 ${c === 'cn' ? '중국' : '일본'} 지역을 열고 ${c === 'cn' ? '중국' : '일본'} 열차를 살 수 있음</span></div>${body}</div>`;
+}
 function tunnelHtml() {
   const T = G.tunnel, C = CFG.tunnel;
   let body;
@@ -885,10 +892,11 @@ function tunnelHtml() {
   return `<div class="wbox" style="margin-bottom:8px"><div><b>🌊 한일 해저터널</b> <span class="muted" style="font-size:12px">부산–쓰시마–이키–가라쓰–하카타 · 개통하면 일본 지역을 열 수 있음</span></div><div style="margin-top:4px">${body}</div></div>`;
 }
 function renderRegions() {
-  $('regions').innerHTML = tunnelHtml() + S.D.regions.map(rg => {
+  $('regions').innerHTML = licenseHtml('cn') + licenseHtml('jp') + tunnelHtml() + S.D.regions.map(rg => {
     const ss = stations.filter(s => s.region === rg.id), on = ss.reduce((a, s) => a + s.on, 0);
     const open = G.unlocked.has(rg.id), c = CFG.unlockCost[rg.id], reach = S.regionReachable(rg.id);
     if (rg.tunnel) return `<div class="gu ${open ? 'open' : ''}" data-region="${rg.id}"><span><b>${esc(rg.name)}</b><br><span class="muted">쓰시마·이키 (가상 역)</span></span>${open ? '<span class="tag ok">개통</span>' : '<span class="tag gray">공사로 열림</span>'}</div>`;
+    { const lc = S.licenseOf(rg.id); if (lc && !open && !G.licenses.has(lc) && !lvLocked(regionLv(rg.id))) return `<div class="gu" data-region="${rg.id}"><span><b>${esc(rg.name)}</b><br><span class="muted">역 ${ss.length}개 · 하루 승차 ${fmt(on)}명</span></span><button disabled>사업권 필요 · ${won(c)}</button></div>`; }
     if (rg.jp && !G.tunnel?.done && !open) return `<div class="gu" data-region="${rg.id}"><span><b>🇯🇵 ${esc(rg.name)}</b><br><span class="muted">역 ${ss.length}개 · 하루 승차 ${fmt(on)}명</span></span><button disabled>터널 개통 뒤 · ${won(c)}</button></div>`;
     return `<div class="gu ${open ? 'open' : ''}" data-region="${rg.id}"><span><b>${esc(rg.name)}</b><br><span class="muted">역 ${ss.length}개 · 하루 승차 ${fmt(on)}명</span></span>
       ${open ? '<span class="tag ok">개방</span>' : lvLocked(regionLv(rg.id)) ? `<button disabled>${lockTag(regionLv(rg.id))} · ${won(c)}</button>` : `<button data-unlock="${rg.id}" ${!reach || G.money < c ? 'disabled' : ''} title="${reach ? '' : '열린 지역과 선로로 이어져야 합니다'}">${won(c)}</button>`}</div>`;
@@ -962,6 +970,7 @@ function renderHelp() {
     · 🚂 완행열차: 비둘기호 → 통일호 → 무궁화호 (싸고 느림, 모든 선로)<br>
     · 🚆 일반열차: 새마을호 → 누리로 → ITX-새마을 → ITX-마음 (누리로부터 전철화 선로만)<br>
     · 🚈 광역열차: 대경선 같은 지역 통근열차. 전철화 선로만. 광역열차만 태우는 <b>통근 승객</b>(4~70km, 출퇴근 7~9시·17~19시에 몰림)이 따로 있고, 배차가 잦을수록(10~20분) 크게 늘어납니다. 대도시 주변(대구·대전·수도권)에서 유리<br>
+    · 🏢 해외 사업권: 🇨🇳 중국(Lv${CFG.license.cn.gate}, ${won(CFG.license.cn.cost)}) · 🇯🇵 일본(Lv${CFG.license.jp.gate}, ${won(CFG.license.jp.cost)}). 🗺️ 지역에서 삼. 사야 그 나라 지역을 열고 열차를 살 수 있음<br>
     · 🇨🇳 중국(Lv${CFG.gate.region.cn_dongbei}): 북한 신의주–단둥, 남양–투먼 국경으로 동북부터 차례로. 국경은 KTX와 중국 고속 동차만. 중국 선로는 중국 열차만(보통·쾌속, 고속 동차). 통근 승객(광역열차)은 한국에만. 승객이 많지만 운임이 쌈. 노선 모양은 직선<br>
     · 🌊 한일 해저터널(Lv${CFG.gate.tunnel}, ${won(CFG.tunnel.cost)}, ${CFG.tunnel.days}일): 🗺️ 지역에서 공사. 개통하면 일본 지역을 규슈부터 차례로 열 수 있음. 터널은 KTX·신칸센만, 일본 선로는 일본 열차만(보통·쾌속, 특급, 신칸센)<br>
     · 🚄 고속열차: KTX → KTX-산천 → KTX-이음 → KTX-청룡. 고속선과 전철화된 일반선<br>
@@ -1122,6 +1131,7 @@ function planLink(a, b, kind) {
   const regions = [];
   for (const id of Q.nodes) { const rg = stations[id].region; if (!G.unlocked.has(rg) && !regions.includes(rg)) regions.push(rg); }
   for (const rg of regions) if (CFG.unlockCost[rg] == null || (rg.startsWith('jp_') && !G.tunnel?.done)) return { err: '한일 해저터널이 개통되어야 갈 수 있습니다 (🗺️ 지역 → 해저터널 공사)' };
+  for (const rg of regions) { const lc = S.licenseOf(rg); if (lc && !G.licenses.has(lc)) return { err: `${S.regionName[rg]} 지역을 지나야 하는데, ${CFG.license[lc].name}이 없습니다 (🗺️ 지역에서 사기)` }; }
   for (const rg of regions) if (lvLocked(regionLv(rg))) return { err: `${S.regionName[rg]} 지역을 지나야 하는데, 이 지역은 회사 레벨 ${regionLv(rg)}부터 열 수 있습니다` };
   const secs = S.missingSections(Q);
   const buySt = !S.stOwned(B);
@@ -1515,6 +1525,7 @@ document.addEventListener('click', e => {
     refreshAll();
   }
   else if (d.tiers) openTierTable();
+  else if (d.license) { const L = CFG.license[d.license]; ask(`${L.name}을 ${won(L.cost)}에 살까요?`, '사업권 사기').then(ok => { if (ok) check(S.buyLicense(d.license), `${L.icon} ${L.name}을 샀습니다`); }); }
   else if (d.tunnel) ask(`한일 해저터널 공사를 ${won(CFG.tunnel.cost)}에 시작할까요? ${CFG.tunnel.days}일 뒤 개통합니다`, '공사 시작').then(ok => { if (ok) check(S.startTunnel(), '🚧 한일 해저터널 공사를 시작했습니다'); });
   else if (d.ttedit) openTTEdit(findR(d.ttedit));
   else if (d.ttrec) openTTEdit(findR(d.ttrec), true);

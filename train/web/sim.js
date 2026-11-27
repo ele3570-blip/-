@@ -147,6 +147,9 @@ const CFG = {
     tunnel: 23, // 한일 해저터널 공사
   },
   tunnel: { cost: 1_000_000_000_000, days: 365 },
+  // 해외 사업권: 사야 그 나라 지역을 열고 그 나라 열차를 살 수 있음(한 번만)
+  license: { cn: { name: '중국 철도 사업권', icon: '🇨🇳', gate: 19, cost: 300_000_000_000 },
+             jp: { name: '일본 철도 사업권', icon: '🇯🇵', gate: 23, cost: 500_000_000_000 } },
   // 물가: 늦게 열리는 것일수록 비쌈. 배율 = (그 레벨에서 다음 레벨까지 필요한 수입 ÷ Lv1의 것) ^ 지수
   // 선로·역·공사는 지수 infExp, 열차·등급 올리기는 trainExp(열차 1대가 버는 돈은 레벨이 올라도 크게 늘지 않아서 덜 오름)
   // upkeep: 산 선로·역의 하루 유지비 = 지금 값 × 비율
@@ -250,6 +253,7 @@ const freshState = () => ({
   totalRev: 0, shownLevel: 1, // 누적 운임 수입(레벨), 화면에서 알린 레벨
   mon: null, // 이번 달 누계(월 결산)
   tunnel: null, // 한일 해저터널: { start, end, done }
+  licenses: new Set(), // 산 해외 사업권(cn, jp)
 });
 const G = freshState();
 // 물가 배율
@@ -1082,6 +1086,7 @@ function numberTrains() {
 function buyTrain(kind, free = false) {
   const K = CFG.kinds[kind];
   if (!free) { const e = lvErr(needTrain(kind, 0)); if (e) return { err: `${K.levels[0].name}: ${e}` }; }
+  if (!free && CFG.license[K.country] && !G.licenses.has(K.country)) return { err: `${CFG.license[K.country].name}을 먼저 사야 합니다` };
   if (!free) { if (G.money < K.price) return { err: '돈이 부족합니다' }; G.money -= K.price; G.today.bought += K.price; }
   const t = { id: G.nextTrainId++, kind, lvl: 0, no: freeNo(kind), paid: free ? 0 : K.price };
   G.depot.push(t);
@@ -1283,6 +1288,7 @@ function unlockRegion(id) {
   if (G.unlocked.has(id)) return { err: '이미 열린 지역입니다' };
   if (c == null) return { err: '해저터널이 개통되면 열립니다' };
   if (id.startsWith('jp_') && !G.tunnel?.done) return { err: '한일 해저터널이 개통되어야 열 수 있습니다' };
+  { const lc = licenseOf(id); if (lc && !G.licenses.has(lc)) return { err: `${CFG.license[lc].name}을 먼저 사야 합니다` }; }
   { const e = lvErr(CFG.gate.region[id] || 1); if (e) return { err: e }; }
   if (G.money < c) return { err: '돈이 부족합니다' };
   G.money -= c; G.today.bought += c; G.unlocked.add(id);
@@ -1312,6 +1318,20 @@ function finishTunnel() {
   for (const sc of l.sections) G.ownedSecs.add(sc.id);
   for (const e of l.edges) for (const id of [e.a, e.b]) if (stations[id].region === stations[l.edges[1].a].region) G.ownedSt.add(id);
   rebuildNetwork();
+}
+// 해외 사업권
+const licenseOf = region => region.startsWith('cn_') ? 'cn' : region.startsWith('jp_') && region !== 'jp_tunnel' ? 'jp' : null;
+function licenseBlock(c) {
+  const L = CFG.license[c]; if (!L) return '없는 사업권입니다';
+  if (G.licenses.has(c)) return '이미 샀습니다';
+  const e = lvErr(L.gate); if (e) return e;
+  if (G.money < L.cost) return '돈이 부족합니다';
+  return null;
+}
+function buyLicense(c) {
+  const why = licenseBlock(c); if (why) return { err: why };
+  G.money -= CFG.license[c].cost; G.today.bought += CFG.license[c].cost; G.licenses.add(c);
+  return {};
 }
 function regionReachable(id) {
   for (const e of edges) {
@@ -1362,7 +1382,7 @@ const SAVE_KEY = 'korea-rail-save-v3'; // v3: 동대구역 + 무궁화 1대로 �
 function serialize() {
   return JSON.stringify({
     kindsVer: 2, money: G.money, totalRev: G.totalRev, shownLevel: G.shownLevel, debt: G.debt, negDays: G.negDays, over: G.over, day: G.day, rep: G.rep, unlocked: [...G.unlocked], lineUp: G.lineUp, ownedSecs: [...G.ownedSecs], ownedSt: [...G.ownedSt],
-    nextRouteNo: G.nextRouteNo, nextTrainId: G.nextTrainId, history: G.history, tunnel: G.tunnel,
+    nextRouteNo: G.nextRouteNo, nextTrainId: G.nextTrainId, history: G.history, tunnel: G.tunnel, licenses: [...G.licenses],
     mon: G.mon,
     routes: G.routes.map(r => ({ no: r.no, kind: r.kind, color: r.color, stops: r.stops, name: r.name, mon: r.mon, tt: r.tt, yest: r.yest, yestB: r.yestB, yestN: r.yestN, yestRev: r.yestRev, yestCost: r.yestCost })), // 어제 기록: 추천 열차 수용
     trains: G.trains.map(t => ({ id: t.id, no: t.no, kind: t.kind, lvl: t.lvl, route: t.route.no, i: t.i, dir: t.dir, paid: t.paid })),
@@ -1393,7 +1413,7 @@ function deserialize(s) {
   const estRev = (o.history || []).reduce((a, h) => a + (h.revenue || 0), 0) + (o.mon?.revenue || 0);
   Object.assign(G, { money: o.money, totalRev: o.totalRev ?? estRev, shownLevel: Math.min(o.shownLevel ?? 99, levelOf(o.totalRev ?? estRev)) /* 레벨 기준이 바뀌어 내려갔으면 지금 레벨로 */, debt: o.debt || 0, negDays: o.negDays || 0, over: !!o.over, day: o.day, rep: o.rep, unlocked: new Set(o.unlocked), lineUp: o.lineUp || {},
     ownedSecs: new Set(o.ownedSecs || []), ownedSt: new Set(o.ownedSt || []),
-    nextRouteNo: o.nextRouteNo, nextTrainId: o.nextTrainId, history: o.history || [], t: CFG.dayStartMin, today: newToday(), waiting: new Map(), tunnel: o.tunnel || null });
+    nextRouteNo: o.nextRouteNo, nextTrainId: o.nextTrainId, history: o.history || [], t: CFG.dayStartMin, today: newToday(), waiting: new Map(), tunnel: o.tunnel || null, licenses: new Set(o.licenses || []) });
   G.mon = o.mon || newMonth();
   // v0.31~v0.34 불러오기 버그 복구: 날짜·연 지역이 처음 값으로 돌아갔던 저장 → 결산 기록·산 역/구간으로 되살림
   { const last = Math.max(0, ...G.history.map(h => h.day || 0));
@@ -1401,7 +1421,10 @@ function deserialize(s) {
     G.unlocked.add(CFG.startRegion);
     for (const id of G.ownedSt) if (stations[id]) G.unlocked.add(stations[id].region);
     for (const id of G.ownedSecs) { const sc = secById.get(id); if (sc) G.unlocked.add(sc.region); }
-    if (G.rep == null) G.rep = CFG.repStart; }
+    if (G.rep == null) G.rep = CFG.repStart;
+    // 사업권이 생기기 전 저장: 이미 연 중국·일본 지역이나 그 나라 열차가 있으면 사업권을 가진 것으로
+    for (const r of G.unlocked) { const lc = licenseOf(r); if (lc) G.licenses.add(lc); }
+    for (const t of [...(o.trains || []), ...(o.depot || [])]) { const c = CFG.kinds[t.kind]?.country; if (CFG.license[c]) G.licenses.add(c); } }
   G.routes = [];
   for (const r of o.routes) { const legs = buildLegs(r.kind, r.stops); if (legs) G.routes.push({ ...r, legs }); }
   G.trains = [];
@@ -1431,7 +1454,7 @@ function setupNewGame() {
   rebuildNetwork();
 }
 
-root.SIM = { priceMul, infMul, workCost, upkeepPerDay, levelGap, tunnelBlock, startTunnel, tunnelLine, ttNeed, recommendTT, TT_BANDS, NICE_HW, ttOf, depsOf, planTrains, oneWayMin, autoHw, ttBuild, layoutAll, respaceRoute, spacingRatio, get commuteTable() { return commuteTable; }, CFG, D, G, level, levelOf, levelNeed, needTrain, lvErr, resetGame, routeDiag, upgradeBlock, dateOf, isMonthEnd, monthReport, startMonth, assetValue, creditGrade, loanLimit, canBorrow, borrow, repay, stations, byName, lines, edges, adj, sections, secById, edgeOwned, stOwned, secOwned, stationPrice, buyStation,
+root.SIM = { licenseOf, licenseBlock, buyLicense, priceMul, infMul, workCost, upkeepPerDay, levelGap, tunnelBlock, startTunnel, tunnelLine, ttNeed, recommendTT, TT_BANDS, NICE_HW, ttOf, depsOf, planTrains, oneWayMin, autoHw, ttBuild, layoutAll, respaceRoute, spacingRatio, get commuteTable() { return commuteTable; }, CFG, D, G, level, levelOf, levelNeed, needTrain, lvErr, resetGame, routeDiag, upgradeBlock, dateOf, isMonthEnd, monthReport, startMonth, assetValue, creditGrade, loanLimit, canBorrow, borrow, repay, stations, byName, lines, edges, adj, sections, secById, edgeOwned, stOwned, secOwned, stationPrice, buyStation,
   sectionPrice, buySection, missingSections, buySections, ownedKm, regionName, toKm, distKm, isOpen, lineElec, lineDbl, lineVmax, edgeOpen, edgeCap,
   kindOf, tierOf, needsElec, edgeAllowed, findPath, buildLegs, addRoute, routeTitle, routeKm, routeHasNonElec, routeOpen, routeTrains,
   legMinutes, edgeSpeed, cycleMinutes, headway, rideMinutes, rideKm, rebuildNetwork, planFrom, hourShare, peakAt, tick, satPct, closeDay, startNextDay,
