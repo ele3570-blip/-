@@ -16,8 +16,8 @@ android {
         applicationId = "kr.railgame.app"
         minSdk = 24
         targetSdk = 35
-        versionCode = 47
-        versionName = "0.47"
+        versionCode = 48
+        versionName = "0.48"
     }
     signingConfigs {
         if (ksProps.isNotEmpty()) create("release") {
@@ -39,7 +39,7 @@ android {
 }
 
 val copyWeb by tasks.registering(Copy::class) {
-    from(rootProject.file("../web")) { include("*.html", "*.js", "*.png", "*.json") }
+    from(rootProject.file("../web")) { include("*.html", "*.js", "*.png", "*.json"); exclude("dev.html") } // 개발자용 페이지는 앱에 안 넣음
     into(layout.buildDirectory.dir("webassets/www"))
 }
 tasks.named("preBuild") { dependsOn(copyWeb) }

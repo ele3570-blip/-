@@ -1571,18 +1571,39 @@ $('panelClose').onclick = () => openPanel(null);
 $('infoClose').onclick = () => { selected = null; renderInfo(); };
 function focusRoute(r) { fitStations(r.stops.map(id => stations[id])); }
 
-// 속도
-const SPEEDS = [0, 1, 3, 10, 30, 100];
+// 속도: 보통 2·5·10배. 개발자용(window.RAIL_DEV, dev.html)은 30·100배와 '이번 달 마무리'
+const DEV = !!window.RAIL_DEV;
+const SPEEDS = DEV ? [0, 30, 100] : [0, 2, 5, 10];
+SPEEDS.forEach((v, i) => { if (i) { $('sp' + i).textContent = `${v}x`; $('sp' + i).title = `${v}배속`; } });
 function setSpeedUI() {
+  if (!SPEEDS.includes(G.speed)) G.speed = SPEEDS[1];
   SPEEDS.forEach((v, i) => $('sp' + i).classList.toggle('on', G.paused ? i === 0 : v === G.speed));
   const c = $('spCycle'); c.textContent = `${G.speed}x ▸`; c.classList.toggle('on', !G.paused);
 }
-// 폰: 속도 버튼 하나를 누를 때마다 1→3→10→30→100→1 (멈춰 있었으면 지금 속도로 다시 출발)
+// 속도 버튼 하나를 누를 때마다 다음 속도로(마지막 다음은 처음). 멈춰 있었으면 지금 속도로 다시 출발
 $('spCycle').onclick = () => {
   if (G.paused) { G.paused = false; setSpeedUI(); return; }
   const k = SPEEDS.indexOf(G.speed); G.speed = SPEEDS[k + 1 < SPEEDS.length ? k + 1 : 1]; setSpeedUI();
 };
 SPEEDS.forEach((v, i) => $('sp' + i).onclick = () => { if (!v) G.paused = !G.paused; else { G.speed = v; G.paused = false; } setSpeedUI(); });
+// 개발자용: 이번 달 마지막 날까지 바로 진행하고 월 결산 창 띄우기
+if (DEV) {
+  const b = document.createElement('button'); b.id = 'devSkip'; b.textContent = '⏭ 이번 달 마무리'; b.title = '개발자용: 말일까지 바로 진행하고 월 결산';
+  b.style.cssText = 'background:#fef3c7;border-color:#f59e0b;font-weight:700;white-space:nowrap';
+  $('spCycle').after(b);
+  b.onclick = () => {
+    if ($('modal').style.display === 'flex') return toast('열린 창을 먼저 닫으세요');
+    G.paused = true; setSpeedUI();
+    for (let guard = 0; guard < 40; guard++) {
+      while (G.t < CFG.dayEndMin) S.tick(0.5);
+      const last = S.isMonthEnd();
+      endDay();
+      if (last || G.over || $('modal').style.display === 'flex') break; // 월 결산(또는 해저터널 개통 등) 창이 뜨면 멈춤
+    }
+    refreshAll();
+  };
+  document.title = '[개발자용] ' + document.title;
+}
 
 // ───────────────────────── 하루 마감 ─────────────────────────
 const dateTxt = (day = G.day) => { const d = S.dateOf(day); return `${d.y}년 ${d.m}월 ${d.d}일 (${d.w})`; };
