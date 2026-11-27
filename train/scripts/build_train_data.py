@@ -160,11 +160,32 @@ def _nk_names():
 NK_NAME = _nk_names()
 NK_LINES = [(lid, nm, k, e, d, v, ' '.join(NK_NAME[x] for x in seq.split())) for lid, nm, k, e, d, v, seq in NK.NK_LINES]
 NK_COORD = {NK_NAME[k]: tuple(v) for k, v in _nkc.items()}
-ALL_LINES = LINES + NK_LINES
+
+# 일본: 이름이 한국 역과 겹치면 '(일)'. 부산은 해저터널의 한국 쪽 끝(같은 역)
+import jp_data as JP
+_jpc = json.load(open(os.path.join(RAW, 'jp_stations.json'), encoding='utf-8'))
+_jpc.update(JP.FIX)
+
+
+def _jp_names():
+    kr = set(NK_NAME.values())
+    for *_x, seq in LINES: kr.update(seq.split())
+    out = {}
+    for *_x, seq, _c in JP.JP_LINES:
+        for s in seq.split():
+            out[s] = s if s not in _jpc or s not in kr else s + '(일)'
+    return out
+
+
+JP_NAME = _jp_names()
+JP_LINES = [(lid, nm, k, e, d, v, ' '.join(JP_NAME[x] for x in seq.split())) for lid, nm, k, e, d, v, seq, _c in JP.JP_LINES]
+LINE_COUNTRY = {lid: c for lid, *_x, c in JP.JP_LINES}
+JP_COORD = {JP_NAME.get(k, k): (v[0], v[1]) for k, v in _jpc.items() if k in JP_NAME}
+ALL_LINES = LINES + NK_LINES + JP_LINES
 
 
 def all_coords():
-    c = dict(station_coords()); c.update(NK_COORD); return c
+    c = dict(station_coords()); c.update(NK_COORD); c.update(JP_COORD); return c
 
 
 def used_stations():
@@ -276,6 +297,27 @@ def main():
                              'region': adm_region[pr['shapeName']], 'si': '', 'est': 1})
             coord[s] = (lon, lat)
 
+    # 일본 역: 도(都道府県) 경계로 지역, 승객은 한국 전체 승차와 같아지도록 줄임
+    jadm = json.load(open(os.path.join(RAW, 'jpn_adm1.geojson'), encoding='utf-8'))['features']
+    jreg = {n: rid_ for rid_, _, ns in JP.JP_REGIONS for n in ns}
+    kr_on = sum(st['on'] for st in stations if not st.get('est'))
+    jp_used = []
+    for *_x, seq in JP_LINES:
+        for s in seq.split():
+            if s not in idx and s not in jp_used: jp_used.append(s)
+    osm_j = {v: k for k, v in JP_NAME.items()}
+    jp_tot = sum(_jpc[osm_j[s]][2] for s in jp_used)
+    jscale = kr_on / jp_tot
+    print(f'일본 승객 비율: 실제 하루 승하차 × {jscale:.3f} (일본 주요역 {jp_tot:,} → 한국 전체 승차 {kr_on:,})', file=sys.stderr)
+    for s in jp_used:
+        lon, lat, ps = _jpc[osm_j[s]]
+        reg = JP.TUNNEL_REGION[0] if osm_j[s] in ('쓰시마', '이키') else jreg[locate(lon, lat, jadm)['shapeName']]
+        on = max(50, round(ps * jscale))
+        idx[s] = len(stations)
+        stations.append({'name': s, 'lon': round(lon, 5), 'lat': round(lat, 5), 'on': on, 'off': on, 'ktx': 0,
+                         'region': reg, 'si': '', 'jp': 1})
+        coord[s] = (lon, lat)
+
     # 검사: 이웃 역이 너무 멀거나 지그재그면 알림
     lines_out = []
     for lid, name, kind, elec, dbl, vmax, seq in ALL_LINES:
@@ -291,7 +333,7 @@ def main():
             if km(coord[a], coord[c]) < 0.6 * max(km(coord[a], coord[b]), km(coord[b], coord[c])):
                 print(f'  ! {name} 꺾임: {a}-{b}-{c}', file=sys.stderr)
         lines_out.append({'id': lid, 'name': name, 'kind': kind, 'elec': elec, 'dbl': dbl, 'vmax': vmax,
-                          'stations': [idx[s] for s in ss], 'km': segs, 'geom': geo})
+                          'stations': [idx[s] for s in ss], 'km': segs, 'geom': geo, 'country': LINE_COUNTRY.get(lid, 'kr')})
 
     # 지도 배경: 시도 경계(단순화)
     land = []
@@ -306,7 +348,13 @@ def main():
             ring = p[0]
             if len(ring) < 8: continue
             land.append([[round(q[0], 3), round(q[1], 3)] for q in ring[::2]])
-    regions = [{'id': r, 'name': n} for r, n, _ in REGIONS] + [{'id': r, 'name': n, 'nk': 1} for r, n, _ in NK.NK_REGIONS]
+    for f in jadm:  # 일본 도 경계
+        for p in polys(f['geometry']):
+            ring = p[0]
+            if len(ring) < 8: continue
+            land.append([[round(q[0], 3), round(q[1], 3)] for q in ring[::2]])
+    regions = ([{'id': r, 'name': n} for r, n, _ in REGIONS] + [{'id': r, 'name': n, 'nk': 1} for r, n, _ in NK.NK_REGIONS]
+               + [{'id': JP.TUNNEL_REGION[0], 'name': JP.TUNNEL_REGION[1], 'jp': 1, 'tunnel': 1}] + [{'id': r, 'name': n, 'jp': 1} for r, n, _ in JP.JP_REGIONS])
     # 지도에 칠할 지역 모양: 시군구 경계를 지역별로 합침(shapely 필요. 없으면 생략)
     try:
         from shapely.geometry import shape, mapping
@@ -317,7 +365,11 @@ def main():
             if rg: parts.setdefault(rg, []).append(shape(f['geometry']).buffer(0))
         for f in adm:
             parts.setdefault(adm_region[f['properties']['shapeName']], []).append(shape(f['geometry']).buffer(0))
+        for f in jadm:
+            parts.setdefault(jreg[f['properties']['shapeName']], []).append(shape(f['geometry']).buffer(0))
         for r in regions:
+            if not parts.get(r['id']):  # 해저터널: 지도에 칠할 땅 없음
+                r['shape'] = []; r['label'] = LABEL_FIX.get(r['id'], [129.55, 34.05]); continue
             g = unary_union(parts.get(r['id'], [])).buffer(0.002).buffer(-0.002).simplify(0.004)
             polys_ = list(g.geoms) if g.geom_type == 'MultiPolygon' else [g]
             polys_ = [q for q in polys_ if q.area > 0.0005]
@@ -334,7 +386,7 @@ def main():
         print(f"  {r['name']}: 역 {len(ss)}, 하루 승차 {sum(s['on'] for s in ss):,}", file=sys.stderr)
 
     data = {'stations': stations, 'lines': lines_out, 'regions': regions, 'land': land,
-            'source': '한국철도공사 역별 승하차 현황(2025), KTX 역별 승하차(2023), 선로 © OpenStreetMap 기여자(ODbL), 북한 도 경계 geoBoundaries(WFP·OCHA ROAP, CC BY 3.0 IGO), 북한 승차는 인구로 추정'}
+            'source': '한국철도공사 역별 승하차 현황(2025), KTX 역별 승하차(2023), 선로 © OpenStreetMap 기여자(ODbL), 북한 도 경계 geoBoundaries(WFP·OCHA ROAP, CC BY 3.0 IGO), 북한 승차는 인구로 추정, 일본 역별 승하차 국토교통성 국토수치정보(S12-24)·노선 N02-24, 일본 도 경계 geoBoundaries(OSM, ODbL)'}
     with open(OUT, 'w', encoding='utf-8') as f:
         f.write('window.GAME_DATA = ' + json.dumps(data, ensure_ascii=False, separators=(',', ':')) + ';\n')
     print(f'→ {OUT} ({os.path.getsize(OUT):,} bytes)', file=sys.stderr)

@@ -37,11 +37,20 @@ OSM_NAMES = {
     'pyongbu': ['평부선'], 'pyongui': ['평의선'], 'pyongra': ['평라선'], 'gangwon_n': ['강원선'], 'geumgang': ['금강산청년선'],
     'manpo': ['만포선'], 'hambuk': ['함북선'], 'baekdu': ['백두산청년선'], 'pyongnam': ['평남선'], 'hwanghae': ['황해청년선'],
     'pyongdeok': ['평덕선'],
+    # 일본(jp_data.py, 국토수치정보 N02 JR 노선 이름)
+    'jp_tunnel': ['筑肥線'], 'jp_kyushu_s': ['九州新幹線'], 'jp_nishikyushu_s': ['西九州新幹線'], 'jp_kagoshima': ['鹿児島線'],
+    'jp_nagasaki': ['長崎線', '佐世保線'], 'jp_nippo': ['日豊線'], 'jp_sanyo_s': ['山陽新幹線'], 'jp_sanin': ['伯備線', '山陰線'],
+    'jp_yosan': ['本四備讃線', '宇野線', '予讃線'], 'jp_kotoku': ['高徳線'], 'jp_dosan': ['本四備讃線', '宇野線', '予讃線', '土讃線'],
+    'jp_kyotokobe': ['東海道線', '山陽線'], 'jp_yamatoji': ['関西線', '大阪環状線'], 'jp_hanwa': ['阪和線', '大阪環状線'],
+    'jp_kansaiap': ['関西空港線', '阪和線', '大阪環状線'], 'jp_tokaido_s': ['東海道新幹線'], 'jp_hokuriku': ['北陸線'],
+    'jp_hokuriku_s': ['北陸新幹線', '上越新幹線', '東北新幹線'], 'jp_chuo': ['中央線', '篠ノ井線', '信越線'], 'jp_tokaido': ['東海道線'],
+    'jp_sobu': ['総武線'], 'jp_utsunomiya': ['東北線'], 'jp_joetsu_s': ['上越新幹線', '東北新幹線'], 'jp_tohoku_s': ['東北新幹線'],
+    'jp_akita_s': ['田沢湖線', '奥羽線'], 'jp_yamagata_s': ['奥羽線'], 'jp_hokkaido_s': ['北海道新幹線'], 'jp_hakodate': ['函館線'],
 }
 OTHER_PENALTY = 3.0   # 다른 이름 선로를 지날 때 길이 배율
 SNAP_KM = 2.0         # 역에서 이 안의 선로 점에 붙임
 SIMPLIFY_KM = 0.03
-ALLOW_DETOUR = {'honam|대전|서대전'}  # 실제로 대전조차장을 돌아가는 구간
+ALLOW_DETOUR = {'honam|대전|서대전', 'jp_hakodate|신하코다테호쿠토|삿포로'}  # 실제로 대전조차장을 돌아가는 구간
 
 
 def hav(a, b):

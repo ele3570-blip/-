@@ -101,10 +101,12 @@ const trackType = e => e.line.kind === 'hs' ? 'hs' : S.lineElec(e.line) ? 'elec'
 // 지역 모양(km 좌표)과 색. 열린 지역은 지역마다 다른 옅은 색, 닫힌 지역은 회색 빗금
 const REGION_COLOR = { daegu: '#fde2e4', gyeongbuk_e: '#fff1c1', gyeongbuk_n: '#e2f0cb', busan: '#cde7f0', gyeongnam: '#d8f3dc',
   chungcheong: '#ffe5d0', chungbuk: '#e4dcf5', capital: '#fbd6e8', gangwon: '#d3f0e8', jeonbuk: '#f6eac2', jeonnam: '#dbe7fb',
-  nk_hwanghae: '#e9f5d0', nk_pyongyang: '#fde0d2', nk_pyongbuk: '#d9ecf7', nk_east: '#efe0f7', nk_north: '#fff0d6' };
+  nk_hwanghae: '#e9f5d0', nk_pyongyang: '#fde0d2', nk_pyongbuk: '#d9ecf7', nk_east: '#efe0f7', nk_north: '#fff0d6',
+  jp_kyushu: '#fde2e4', jp_chugoku: '#e2f0cb', jp_shikoku: '#cde7f0', jp_kansai: '#ffe5d0', jp_chubu: '#e4dcf5', jp_kanto: '#fbd6e8', jp_tohoku: '#d3f0e8', jp_hokkaido: '#dbe7fb' };
 const REGION_INK = { daegu: '#be123c', gyeongbuk_e: '#a16207', gyeongbuk_n: '#4d7c0f', busan: '#0e7490', gyeongnam: '#15803d',
   chungcheong: '#c2410c', chungbuk: '#6d28d9', capital: '#be185d', gangwon: '#0f766e', jeonbuk: '#a16207', jeonnam: '#1d4ed8',
-  nk_hwanghae: '#4d7c0f', nk_pyongyang: '#c2410c', nk_pyongbuk: '#0369a1', nk_east: '#7e22ce', nk_north: '#b45309' };
+  nk_hwanghae: '#4d7c0f', nk_pyongyang: '#c2410c', nk_pyongbuk: '#0369a1', nk_east: '#7e22ce', nk_north: '#b45309',
+  jp_kyushu: '#be123c', jp_chugoku: '#4d7c0f', jp_shikoku: '#0e7490', jp_kansai: '#c2410c', jp_chubu: '#6d28d9', jp_kanto: '#be185d', jp_tohoku: '#0f766e', jp_hokkaido: '#1d4ed8', jp_tunnel: '#0369a1' };
 const regionShapes = S.D.regions.filter(r => r.shape).map(r => ({ id: r.id, name: r.name,
   rings: r.shape.map(ring => ring.map(([lon, lat]) => S.toKm(lon, lat))), label: S.toKm(...r.label) }));
 const hatch = (() => {
@@ -272,7 +274,9 @@ function draw() {
       ctx.strokeText(title, X, Y); ctx.fillStyle = open ? REGION_INK[r.id] || '#374151' : '#6b7280'; ctx.fillText(title, X, Y);
       if (!open) {
         const need = regionLv(r.id), c = CFG.unlockCost[r.id], reach = S.regionReachable(r.id), ok = reach && G.money >= c && !lvLocked(need);
-        const t2 = lvLocked(need) ? `회사 레벨 ${need} 필요 · ${won(c)}` : `${won(c)}${reach ? (ok ? ' · 열 수 있음' : '') : ' · 이어진 지역 먼저'}`;
+        const t2 = c == null ? (G.tunnel ? `🚧 공사 중 · ${G.tunnel.end - G.day}일 남음` : `회사 레벨 ${CFG.gate.tunnel} · 공사 ${won(CFG.tunnel.cost)}`)
+          : lvLocked(need) ? `회사 레벨 ${need} 필요 · ${won(c)}` : r.id.startsWith('jp_') && !G.tunnel?.done ? `해저터널 개통 뒤 · ${won(c)}`
+          : `${won(c)}${reach ? (ok ? ' · 열 수 있음' : '') : ' · 이어진 지역 먼저'}`;
         ctx.font = '700 12px "Pretendard","Apple SD Gothic Neo","Noto Sans KR",sans-serif';
         const w = ctx.measureText(t2).width + 14;
         ctx.fillStyle = ok ? '#16a34a' : reach ? '#ffffff' : 'rgba(255,255,255,.8)';
@@ -401,9 +405,9 @@ function draw() {
     const { X, Y, ang } = trainScreen(t);
     const tier = S.tierOf(t), full = t.pax.length / tier.cap;
     ctx.save(); ctx.translate(X, Y); ctx.rotate(ang);
-    const w = t.kind === 'ktx' ? 18 : 14, h = 8;
+    const fast = t.kind === 'ktx' || t.kind === 'shinkansen', w = fast ? 18 : 14, h = 8;
     ctx.fillStyle = tier.color; ctx.strokeStyle = t === hoverTrain || selected?.t === t ? '#111827' : '#fff'; ctx.lineWidth = 2;
-    ctx.beginPath(); ctx.roundRect(-w / 2, -h / 2, w, h, t.kind === 'ktx' ? [2, 5, 5, 2] : 2); ctx.fill(); ctx.stroke();
+    ctx.beginPath(); ctx.roundRect(-w / 2, -h / 2, w, h, fast ? [2, 5, 5, 2] : 2); ctx.fill(); ctx.stroke();
     // 승차율
     ctx.fillStyle = 'rgba(255,255,255,.85)'; ctx.fillRect(-w / 2 + 2, -1, (w - 4) * Math.min(1, full), 2);
     ctx.restore();
@@ -428,7 +432,7 @@ function stationHtml(s) {
   const rs = S.servedBy.get(s.id) || [];
   const T = S.destTable.get(s.id);
   let h = `<div><b style="font-size:15px">${esc(s.name)}역</b> <span class="tag">${tierOfStation(s).name}</span> <span class="tag gray">${esc(S.regionName[s.region])}</span> ${open ? '' : '<span class="tag warn">미개방</span>'}</div>
-    <div class="muted">${s.est ? '북한 · 하루 승차 <b>추정</b>(도시 인구로)' : esc(s.si) + ' · 실제 하루 승차'} ${fmt(s.on)}명 · 하차 ${fmt(s.off)}명${s.ktx ? ` · KTX ${Math.round(s.ktx * 100)}%` : ''}</div>`;
+    <div class="muted">${s.est ? '북한 · 하루 승차 <b>추정</b>(도시 인구로)' : s.jp ? (s.region === 'jp_tunnel' ? '해저터널 가상 역 · 하루 승차' : '일본 · 하루 승차(실제를 한국과 균형 맞게 줄임)') : esc(s.si) + ' · 실제 하루 승차'} ${fmt(s.on)}명 · 하차 ${fmt(s.off)}명${s.ktx ? ` · KTX ${Math.round(s.ktx * 100)}%` : ''}</div>`;
   if (open && !S.stOwned(s)) h += `<div style="margin-top:6px"><button class="primary" data-buyst="${s.id}" ${G.money < S.stationPrice(s) ? 'disabled' : ''}>🏷 역 사기 ${won(S.stationPrice(s))}</button> <span class="muted">사야 열차를 세울 수 있습니다</span></div>`;
   if (open) {
     h += `<div style="margin-top:6px">🧍 기다리는 승객 <b>${fmt(q.length)}</b>명 · 지나는 노선 ${rs.length}개${T ? ` · 이어진 수요 ${Math.round(T.served * 100)}%` : ''}</div>`;
@@ -763,7 +767,9 @@ function applyAllRec() {
 }
 function renderRoutes() {
   $('newRouteBtns').innerHTML = Object.entries(CFG.kinds).map(([k, K]) => { const need = S.needTrain(k, 0);
-    return `<button data-newroute="${k}" ${lvLocked(need) ? 'disabled' : ''}>${lvLocked(need) ? lockTag(need) : K.icon} 새 ${K.name}<br><span class="muted">${k === 'local' ? '일반선(모든 선로)' : k === 'general' ? '일반선(누리로부터 전철화)' : k === 'metro' ? '전철화 선로' : S.level() < CFG.gate.hs ? `전철화 선로(고속선 Lv${CFG.gate.hs})` : '고속선·전철화 선로'}</span></button>`; }).join('');
+    const d = { local: '일반선(모든 선로)', general: '일반선(누리로부터 전철화)', metro: '전철화 선로', ktx: S.level() < CFG.gate.hs ? `전철화 선로(고속선 Lv${CFG.gate.hs})` : '고속선·전철화 선로·해저터널',
+      jp_local: '일본 재래선', jp_ltd: '일본 재래선(전철화)', jp_metro: '일본 재래선(전철화)', shinkansen: '일본 신칸센 선로·해저터널' }[k] || '';
+    return `<button data-newroute="${k}" ${lvLocked(need) ? 'disabled' : ''}>${lvLocked(need) ? lockTag(need) : K.icon} 새 ${K.name}<br><span class="muted">${d}</span></button>`; }).join('');
   // 열차 종류별로 묶음(일반 · 광역 · 고속). 머리줄을 누르면 접기/펴기
   const card = r => {
     const ts = S.routeTrains(r), p = (r.revToday || 0) - (r.costToday || 0);
@@ -864,10 +870,23 @@ function upBtn(t) {
   const why = S.upgradeBlock(t);
   return `<button data-up="${t.id}" ${why || G.money < nx.upgrade ? 'disabled' : ''} title="${esc(why || '')}">⬆ ${nx.name} (${won(nx.upgrade)})</button>${why ? `<span class="muted" style="font-size:11px;flex-basis:100%">${esc(why)}</span>` : ''}`;
 }
+function tunnelHtml() {
+  const T = G.tunnel, C = CFG.tunnel;
+  let body;
+  if (T?.done) body = `<span class="tag ok">개통</span> <span class="muted">KTX·신칸센만 다님</span>`;
+  else if (T) { const left = T.end - G.day, pct = Math.round((G.day - T.start) / (T.end - T.start) * 100);
+    body = `🚧 공사 중 ${pct}% · 개통까지 ${left}일 (${dateTxt(T.end)})<div class="lvbar" style="display:block;height:6px;margin-top:4px"><i style="width:${pct}%"></i></div>`; }
+  else { const why = S.tunnelBlock();
+    body = lvLocked(CFG.gate.tunnel) ? `<button disabled>${lockTag(CFG.gate.tunnel)} 공사 ${won(C.cost)}</button>`
+      : `<button class="primary" data-tunnel="1" ${why ? `disabled title="${esc(why)}"` : ''}>🚧 공사 시작 ${won(C.cost)} · ${C.days}일</button>${why && why !== '돈이 부족합니다' ? `<div class="muted" style="font-size:12px">${esc(why)}</div>` : ''}`; }
+  return `<div class="wbox" style="margin-bottom:8px"><div><b>🌊 한일 해저터널</b> <span class="muted" style="font-size:12px">부산–쓰시마–이키–가라쓰–하카타 · 개통하면 일본 지역을 열 수 있음</span></div><div style="margin-top:4px">${body}</div></div>`;
+}
 function renderRegions() {
-  $('regions').innerHTML = S.D.regions.map(rg => {
+  $('regions').innerHTML = tunnelHtml() + S.D.regions.map(rg => {
     const ss = stations.filter(s => s.region === rg.id), on = ss.reduce((a, s) => a + s.on, 0);
     const open = G.unlocked.has(rg.id), c = CFG.unlockCost[rg.id], reach = S.regionReachable(rg.id);
+    if (rg.tunnel) return `<div class="gu ${open ? 'open' : ''}" data-region="${rg.id}"><span><b>${esc(rg.name)}</b><br><span class="muted">쓰시마·이키 (가상 역)</span></span>${open ? '<span class="tag ok">개통</span>' : '<span class="tag gray">공사로 열림</span>'}</div>`;
+    if (rg.jp && !G.tunnel?.done && !open) return `<div class="gu" data-region="${rg.id}"><span><b>🇯🇵 ${esc(rg.name)}</b><br><span class="muted">역 ${ss.length}개 · 하루 승차 ${fmt(on)}명</span></span><button disabled>터널 개통 뒤 · ${won(c)}</button></div>`;
     return `<div class="gu ${open ? 'open' : ''}" data-region="${rg.id}"><span><b>${esc(rg.name)}</b><br><span class="muted">역 ${ss.length}개 · 하루 승차 ${fmt(on)}명</span></span>
       ${open ? '<span class="tag ok">개방</span>' : lvLocked(regionLv(rg.id)) ? `<button disabled>${lockTag(regionLv(rg.id))} · ${won(c)}</button>` : `<button data-unlock="${rg.id}" ${!reach || G.money < c ? 'disabled' : ''} title="${reach ? '' : '열린 지역과 선로로 이어져야 합니다'}">${won(c)}</button>`}</div>`;
   }).join('');
@@ -940,6 +959,7 @@ function renderHelp() {
     · 🚂 완행열차: 비둘기호 → 통일호 → 무궁화호 (싸고 느림, 모든 선로)<br>
     · 🚆 일반열차: 새마을호 → 누리로 → ITX-새마을 → ITX-마음 (누리로부터 전철화 선로만)<br>
     · 🚈 광역열차: 대경선 같은 지역 통근열차. 전철화 선로만. 광역열차만 태우는 <b>통근 승객</b>(4~70km, 출퇴근 7~9시·17~19시에 몰림)이 따로 있고, 배차가 잦을수록(10~20분) 크게 늘어납니다. 대도시 주변(대구·대전·수도권)에서 유리<br>
+    · 🌊 한일 해저터널(Lv${CFG.gate.tunnel}, ${won(CFG.tunnel.cost)}, ${CFG.tunnel.days}일): 🗺️ 지역에서 공사. 개통하면 일본 지역을 규슈부터 차례로 열 수 있음. 터널은 KTX·신칸센만, 일본 선로는 일본 열차만(보통·쾌속, 특급, 통근전철, 신칸센)<br>
     · 🚄 고속열차: KTX → KTX-산천 → KTX-이음 → KTX-청룡. 고속선과 전철화된 일반선<br>
     · 선로 색: 파랑 = 고속선(KTX만), 초록 = 전철 일반선, 갈색 점선 = 비전철 일반선(완행열차·새마을호만). 노선을 누르면 지나는 선로 종류가 색 띠와 km로 나옵니다<br>
     · 선로마다 시간당 다닐 수 있는 열차 수가 정해져 있습니다(단선 ${CFG.capSingle} · 복선 ${CFG.capDouble} · 고속선 ${CFG.capHs}). 넘치면 빨갛게 표시되고 느려집니다<br>
@@ -1083,8 +1103,9 @@ function planLink(a, b, kind) {
   let Q = (detour ? Qbuy : P) || Qbuy;
   let elec = [];
   // 전철화가 필요한 열차(광역·KTX·ITX-마음)인데 비전철 선로 때문에 막히면: 일반열차 길로 잇고 그 선로를 전철화까지 함께 제안
+  const baseK = CFG.kinds[kind].country === 'jp' ? 'jp_local' : 'local';
   if (!Q && (CFG.kinds[kind].elec || kind === 'ktx')) {
-    const Qg = S.findPath(a, b, 'local', true) || S.findPath(a, b, 'local', 'all');
+    const Qg = S.findPath(a, b, baseK, true) || S.findPath(a, b, baseK, 'all');
     if (Qg && !(kind === 'ktx' && Qg.edges.some(e => e.line.kind === 'hs' && lvLocked(CFG.gate.hs)))) {
       elec = [...new Set(Qg.edges.filter(e => !S.lineElec(e.line)).map(e => e.line))];
       if (elec.length) {
@@ -1096,6 +1117,7 @@ function planLink(a, b, kind) {
   if (!Q) return { err: whyNoLink(a, b, kind) };
   const regions = [];
   for (const id of Q.nodes) { const rg = stations[id].region; if (!G.unlocked.has(rg) && !regions.includes(rg)) regions.push(rg); }
+  for (const rg of regions) if (CFG.unlockCost[rg] == null || (rg.startsWith('jp_') && !G.tunnel?.done)) return { err: '한일 해저터널이 개통되어야 갈 수 있습니다 (🗺️ 지역 → 해저터널 공사)' };
   for (const rg of regions) if (lvLocked(regionLv(rg))) return { err: `${S.regionName[rg]} 지역을 지나야 하는데, 이 지역은 회사 레벨 ${regionLv(rg)}부터 열 수 있습니다` };
   const secs = S.missingSections(Q);
   const buySt = !S.stOwned(B);
@@ -1111,6 +1133,11 @@ function planLink(a, b, kind) {
 // 왜 못 가는지: 전철화·고속선 레벨·선로 없음
 function whyNoLink(a, b, kind) {
   const K = CFG.kinds[kind];
+  { const jpA = !!stations[a].jp || stations[a].region === 'jp_tunnel', jpB = !!stations[b].jp || stations[b].region === 'jp_tunnel', jpK = K.country === 'jp';
+    if (jpA !== jpB && !K.tunnel) return `${josa(K.name, '은', '는')} 한일 해저터널을 지날 수 없습니다. 터널은 KTX·신칸센만 다닙니다`;
+    if (jpA !== jpB && !G.tunnel?.done) return '한일 해저터널이 아직 개통되지 않았습니다';
+    if (jpK && !jpA && !jpB) return `${josa(K.name, '은', '는')} 일본 선로만 다닙니다`;
+    if (!jpK && jpA && jpB) return `${josa(K.name, '은', '는')} 한국 열차라 일본 선로를 다닐 수 없습니다. 일본 열차를 쓰세요`; }
   if (kind === 'ktx' && S.level() < CFG.gate.hs) {
     if (S.findPath(a, b, 'local', 'all')) return `KTX는 회사 레벨 ${CFG.gate.hs} 전까지 고속선을 못 쓰고, 전철화된 일반선으로는 이 두 역이 이어지지 않습니다`;
   }
@@ -1483,6 +1510,7 @@ document.addEventListener('click', e => {
     refreshAll();
   }
   else if (d.tiers) openTierTable();
+  else if (d.tunnel) ask(`한일 해저터널 공사를 ${won(CFG.tunnel.cost)}에 시작할까요? ${CFG.tunnel.days}일 뒤 개통합니다`, '공사 시작').then(ok => { if (ok) check(S.startTunnel(), '🚧 한일 해저터널 공사를 시작했습니다'); });
   else if (d.ttedit) openTTEdit(findR(d.ttedit));
   else if (d.ttrec) openTTEdit(findR(d.ttrec), true);
   else if (d.ttview) openTTView(findR(d.ttview));
@@ -1544,6 +1572,15 @@ SPEEDS.forEach((v, i) => $('sp' + i).onclick = () => { if (!v) G.paused = !G.pau
 const dateTxt = (day = G.day) => { const d = S.dateOf(day); return `${d.y}년 ${d.m}월 ${d.d}일 (${d.w})`; };
 const monthTxt = dt => `${dt.y}년 ${dt.m}월`;
 // 하루 마감: 날마다 조용히 넘어가고, 달이 끝나면 월 결산을 보여 줌
+function tunnelNews() {
+  if (!G.tunnelNews) return; G.tunnelNews = false;
+  G.paused = true; setSpeedUI();
+  showModal(`<h2 style="margin:0 0 8px">🌊 한일 해저터널 개통!</h2>
+    <p>부산–쓰시마–이키–가라쓰–하카타 해저터널이 열렸습니다. 터널은 <b>KTX와 신칸센</b>만 다닐 수 있습니다.</p>
+    <p>🗺️ 지역에서 <b>규슈</b>부터 일본 지역을 열고, 일본 노선에는 일본 열차(보통·쾌속, 특급, 통근전철, 신칸센)를 넣으세요.</p>
+    <button class="primary" id="askNo" style="width:100%">좋아요</button>`);
+  $('askNo').onclick = () => { hideModal(); G.paused = false; setSpeedUI(); };
+}
 function endDay() {
   const R = S.closeDay();
   if (R.over) {
@@ -1556,7 +1593,7 @@ function endDay() {
   }
   if (R.sold.length) toast(`🏦 은행이 열차를 강제로 팔았습니다: ${R.sold.map(x => x.label).join(', ')}`);
   else if (R.negDays) toast(`⚠️ 자금 마이너스 ${R.negDays}일째 — ${CFG.loan.graceDays}일이면 열차 강제 매각`);
-  if (!R.monthEnd) { S.startNextDay(); refreshAll(); return; }
+  if (!R.monthEnd) { S.startNextDay(); tunnelNews(); refreshAll(); return; }
   // 월 결산
   G.paused = true; setSpeedUI();
   const M = S.monthReport();
@@ -1596,7 +1633,7 @@ function endDay() {
     ${M.gaveUp > M.pax * 0.3 ? '<p class="muted">기다리다 떠난 승객이 많습니다. 배차 간격을 줄이세요.</p>' : ''}
     </div>
     <button class="primary" id="nextDay" style="width:100%;margin-top:10px">${monthTxt(S.dateOf(G.day + 1))} 시작</button>`);
-  $('nextDay').onclick = () => { hideModal(); S.startNextDay(); S.startMonth(); G.paused = false; setSpeedUI(); refreshAll(); };
+  $('nextDay').onclick = () => { hideModal(); S.startNextDay(); tunnelNews(); S.startMonth(); G.paused = false; setSpeedUI(); refreshAll(); };
   save();
 }
 

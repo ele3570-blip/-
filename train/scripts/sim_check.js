@@ -37,5 +37,5 @@ for (let d = 0; d < +days; d++) {
   for (const r of G.routes) console.log(`   ${S.routeTitle(r)}: 승객 ${r.paxToday || 0} 수입 ${m(r.revToday || 0)} 운행비 ${m(r.costToday || 0)} 열차 ${S.routeTrains(r).length}`);
   S.startNextDay();
 }
-const snap = S.serialize(); S.deserialize(snap);
+const snap = S.serialize(); S.resetGame(); S.deserialize(snap); // 새 게임 상태에서 불러와야 빠진 값이 드러남
 console.log('저장·불러오기', S.serialize() === snap ? '같음' : '다름!');

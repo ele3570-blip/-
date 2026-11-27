@@ -17,28 +17,51 @@ const CFG = {
   // fare = [최저 요금, km당 요금], upgrade = 아래 등급에서 올리는 비용, elec = 전철화된 선로만
   kinds: {
     // 완행: 모든 역에 서는 옛 보통열차 계열. 싸고 느림. 비전철 선로 OK
-    local: { name: '완행열차', icon: '🚂', price: 1_500_000, tracks: ['conv'], levels: [
+    local: { name: '완행열차', icon: '🚂', price: 1_500_000, tracks: ['conv'], country: 'kr', levels: [
       { name: '비둘기호', cars: 5, seats: 400, cap: 80, vmax: 110, stopLoss: 1.8, perKm: 80,  perDay: 12_000, fare: [1_500, 50], comfort: 0,  upgrade: 0,         color: '#64748b' },
       { name: '통일호',   cars: 6, seats: 430, cap: 86, vmax: 130, stopLoss: 2.0, perKm: 120, perDay: 20_000, fare: [2_000, 58], comfort: 5,  upgrade: 1_500_000, color: '#b45309' },
       { name: '무궁화호', cars: 7, seats: 500, cap: 100, vmax: 150, stopLoss: 2.5, perKm: 180, perDay: 30_000, fare: [2_600, 66], comfort: 10, upgrade: 2_500_000, color: '#2563eb' },
     ] },
     // 일반(특급): 새마을호(객차·비전철 OK) → 누리로부터는 전동차라 전철화 선로만
-    general: { name: '일반열차', icon: '🚆', price: 6_000_000, tracks: ['conv'], levels: [
+    general: { name: '일반열차', icon: '🚆', price: 6_000_000, tracks: ['conv'], country: 'kr', levels: [
       { name: '새마을호',   cars: 6, seats: 330, cap: 66, vmax: 150, stopLoss: 2.2, perKm: 260, perDay: 45_000, fare: [3_200, 90], comfort: 15, upgrade: 0,         color: '#16a34a' },
       { name: '누리로',     cars: 8, seats: 528, cap: 106, vmax: 160, stopLoss: 1.6, perKm: 220, perDay: 42_000, fare: [3_400, 95], comfort: 16, upgrade: 3_000_000, color: '#ea580c', elec: true },
       { name: 'ITX-새마을', cars: 12, seats: 752, cap: 150, vmax: 180, stopLoss: 1.5, perKm: 200, perDay: 40_000, fare: [3_600, 100], comfort: 20, upgrade: 3_500_000, color: '#dc2626', elec: true },
       { name: 'ITX-마음',   cars: 12, seats: 780, cap: 156, vmax: 200, stopLoss: 1.4, perKm: 160, perDay: 35_000, fare: [3_800, 106], comfort: 25, upgrade: 4_000_000, color: '#7c3aed', elec: true },
     ] },
-    metro: { name: '광역열차', icon: '🚈', price: 2_500_000, tracks: ['conv'], elec: true, levels: [
+    metro: { name: '광역열차', icon: '🚈', price: 2_500_000, tracks: ['conv'], elec: true, country: 'kr', commute: true, levels: [
       { name: '광역전철 4량', cars: 4, seats: 640, cap: 128, vmax: 110, stopLoss: 1.0, perKm: 150, perDay: 40_000, fare: [1_500, 40], comfort: 0, upgrade: 0,         color: '#0d9488' },
       { name: '광역전철 6량', cars: 6, seats: 960, cap: 192, vmax: 130, stopLoss: 1.0, perKm: 210, perDay: 50_000, fare: [1_500, 43], comfort: 3, upgrade: 2_000_000, color: '#0891b2' },
       { name: '광역전철 8량', cars: 8, seats: 1280, cap: 256, vmax: 150, stopLoss: 1.0, perKm: 270, perDay: 60_000, fare: [1_500, 46], comfort: 5, upgrade: 2_500_000, color: '#0369a1' },
     ] },
-    ktx: { name: '고속열차', icon: '🚄', price: 40_000_000, tracks: ['hs', 'conv'], elec: true, levels: [
+    ktx: { name: '고속열차', icon: '🚄', price: 40_000_000, tracks: ['hs', 'conv'], elec: true, country: 'kr', tunnel: true, levels: [
       { name: 'KTX',      cars: 20, seats: 935, cap: 187,  vmax: 280, stopLoss: 3.8, perKm: 1_800, perDay: 700_000, fare: [8_400, 145], comfort: 20, upgrade: 0,          color: '#334155' },
       { name: 'KTX-산천', cars: 20, seats: 730, cap: 190,  vmax: 300, stopLoss: 3.3, perKm: 1_650, perDay: 650_000, fare: [8_400, 150], comfort: 27, upgrade: 15_000_000, color: '#1e3a8a' },
       { name: 'KTX-이음', cars: 12, seats: 760, cap: 196,  vmax: 310, stopLoss: 2.2, perKm: 1_400, perDay: 560_000, fare: [8_400, 155], comfort: 32, upgrade: 20_000_000, color: '#0f766e' },
       { name: 'KTX-청룡', cars: 16, seats: 1030, cap: 220, vmax: 330, stopLoss: 2.0, perKm: 1_700, perDay: 650_000, fare: [8_400, 162], comfort: 38, upgrade: 30_000_000, color: '#be185d' },
+    ] },
+    // ── 일본(해저터널 뒤): 일본 선로만 다님. 편성·정원은 실제 대략값, 게임 정원 ≈ 실제 ÷ 5 (등급마다 오르도록 중련·입석 포함)
+    jp_local: { name: '보통·쾌속(일본)', icon: '🚃', price: 1_500_000, tracks: ['conv'], country: 'jp', levels: [
+      { name: '키하40', cars: 2, seats: 200, cap: 40, vmax: 95, stopLoss: 1.8, perKm: 90, perDay: 15_000, fare: [1_500, 55], comfort: 2, upgrade: 0, color: '#64748b' },
+      { name: '113계 쾌속', cars: 4, seats: 560, cap: 112, vmax: 110, stopLoss: 1.5, perKm: 150, perDay: 30_000, fare: [2_000, 62], comfort: 6, upgrade: 2_000_000, color: '#ea580c', elec: true },
+      { name: '223계 신쾌속', cars: 8, seats: 1100, cap: 220, vmax: 130, stopLoss: 1.2, perKm: 230, perDay: 45_000, fare: [2_600, 70], comfort: 12, upgrade: 3_000_000, color: '#0f766e', elec: true },
+    ] },
+    jp_ltd: { name: '특급(일본)', icon: '🚝', price: 6_000_000, tracks: ['conv'], country: 'jp', elec: true, levels: [
+      { name: '485계', cars: 6, seats: 360, cap: 72, vmax: 120, stopLoss: 2.0, perKm: 250, perDay: 45_000, fare: [3_200, 95], comfort: 16, upgrade: 0, color: '#b91c1c' },
+      { name: '783계', cars: 7, seats: 420, cap: 84, vmax: 130, stopLoss: 1.8, perKm: 230, perDay: 42_000, fare: [3_400, 100], comfort: 20, upgrade: 3_500_000, color: '#475569' },
+      { name: '885계 소닉(중련)', cars: 12, seats: 600, cap: 120, vmax: 130, stopLoss: 1.6, perKm: 210, perDay: 40_000, fare: [3_600, 105], comfort: 24, upgrade: 4_000_000, color: '#1d4ed8' },
+      { name: '271계 하루카', cars: 9, seats: 650, cap: 130, vmax: 130, stopLoss: 1.5, perKm: 190, perDay: 38_000, fare: [3_800, 110], comfort: 28, upgrade: 4_500_000, color: '#7c3aed' },
+    ] },
+    jp_metro: { name: '통근전철(일본)', icon: '🚇', price: 2_500_000, tracks: ['conv'], country: 'jp', elec: true, commute: true, levels: [
+      { name: '103계', cars: 10, seats: 1440, cap: 288, vmax: 100, stopLoss: 1.0, perKm: 180, perDay: 45_000, fare: [1_500, 40], comfort: 0, upgrade: 0, color: '#ea580c' },
+      { name: '205계', cars: 10, seats: 1500, cap: 300, vmax: 110, stopLoss: 1.0, perKm: 200, perDay: 50_000, fare: [1_500, 43], comfort: 3, upgrade: 2_000_000, color: '#16a34a' },
+      { name: 'E233계', cars: 10, seats: 1580, cap: 316, vmax: 120, stopLoss: 1.0, perKm: 220, perDay: 55_000, fare: [1_500, 46], comfort: 6, upgrade: 2_500_000, color: '#0284c7' },
+    ] },
+    shinkansen: { name: '신칸센', icon: '🚅', price: 40_000_000, tracks: ['hs'], country: 'jp', elec: true, tunnel: true, levels: [
+      { name: '0계', cars: 16, seats: 1340, cap: 268, vmax: 210, stopLoss: 3.5, perKm: 2_000, perDay: 750_000, fare: [8_400, 145], comfort: 18, upgrade: 0, color: '#1e40af' },
+      { name: '100계', cars: 16, seats: 1321, cap: 272, vmax: 230, stopLoss: 3.2, perKm: 1_900, perDay: 720_000, fare: [8_400, 150], comfort: 24, upgrade: 15_000_000, color: '#1d4ed8' },
+      { name: '300계', cars: 16, seats: 1323, cap: 280, vmax: 270, stopLoss: 2.8, perKm: 1_800, perDay: 680_000, fare: [8_400, 155], comfort: 30, upgrade: 20_000_000, color: '#2563eb' },
+      { name: 'N700S', cars: 16, seats: 1319, cap: 290, vmax: 300, stopLoss: 2.4, perKm: 1_700, perDay: 650_000, fare: [8_400, 162], comfort: 36, upgrade: 30_000_000, color: '#0ea5e9' },
     ] },
   },
   hsTrackFeePerKm: 300,         // 고속선 선로 사용료(열차 1km당)
@@ -89,18 +112,21 @@ const CFG = {
     { need: 1_300_000_000_000, desc: '북한 평북·자강 · 강원·함남 지역' },
     { need: 1_800_000_000_000, desc: '광주·전남 지역' },
     { need: 2_400_000_000_000, desc: '북한 함북·양강 지역' },
-    { need: 3_200_000_000_000, desc: '한일 해저터널 공사(1조원 · 1년) → 일본(추가 예정)' },
+    { need: 3_200_000_000_000, desc: '한일 해저터널 공사(1조원 · 1년) → 일본 · 신칸센 등 일본 열차' },
     { need: 6_000_000_000_000, desc: 'KTX-청룡' },
   ],
   // 필요한 레벨(1부터). 열차는 '종류:등급'
   gate: {
     train: { 'local:0': 1, 'local:1': 3, 'local:2': 6, 'general:0': 6, 'general:1': 7, 'general:2': 9, 'general:3': 13,
-             'metro:0': 1, 'metro:1': 7, 'metro:2': 15, 'ktx:0': 9, 'ktx:1': 10, 'ktx:2': 11, 'ktx:3': 20 },
+             'metro:0': 1, 'metro:1': 7, 'metro:2': 15, 'ktx:0': 9, 'ktx:1': 10, 'ktx:2': 11, 'ktx:3': 20,
+             'jp_local:0': 19, 'jp_local:1': 19, 'jp_local:2': 20, 'jp_ltd:0': 19, 'jp_ltd:1': 19, 'jp_ltd:2': 20, 'jp_ltd:3': 20,
+             'jp_metro:0': 19, 'jp_metro:1': 19, 'jp_metro:2': 20, 'shinkansen:0': 19, 'shinkansen:1': 19, 'shinkansen:2': 20, 'shinkansen:3': 20 },
     region: { daegu: 1, gyeongbuk_n: 2, gyeongbuk_e: 3, gyeongnam: 4, busan: 5, chungbuk: 7, chungcheong: 8, capital: 11, gangwon: 13, jeonbuk: 15, jeonnam: 17,
-              nk_hwanghae: 12, nk_pyongyang: 14, nk_pyongbuk: 16, nk_east: 16, nk_north: 18 }, // 북한: 수도권(경의선 도라산)에서 개성으로
+              nk_hwanghae: 12, nk_pyongyang: 14, nk_pyongbuk: 16, nk_east: 16, nk_north: 18,
+              jp_kyushu: 19, jp_chugoku: 19, jp_shikoku: 19, jp_kansai: 19, jp_chubu: 19, jp_kanto: 19, jp_tohoku: 19, jp_hokkaido: 19 }, // 일본: 해저터널 개통 뒤 규슈부터 이어진 순서로 // 북한: 수도권(경의선 도라산)에서 개성으로
     work: { elec: 6, dbl: 7, speed: 13 },
     hs: 10,
-    tunnel: 19, // 한일 해저터널(일본은 추가 예정)
+    tunnel: 19, // 한일 해저터널 공사
   },
   tunnel: { cost: 1_000_000_000_000, days: 365 },
   loanLevelMul: [0.5, 0.59, 0.69, 0.78, 0.88, 0.97, 1.07, 1.16, 1.26, 1.35, 1.45, 1.54, 1.64, 1.73, 1.83, 1.92, 2.02, 2.11, 2.21, 2.3], // 대출 한도 × 레벨 배율
@@ -120,7 +146,9 @@ const CFG = {
   unlockCost: { gyeongbuk_e: 8_000_000, gyeongbuk_n: 5_000_000, busan: 15_000_000, gyeongnam: 8_000_000,
                 chungcheong: 40_000_000, chungbuk: 20_000_000, capital: 120_000_000, gangwon: 30_000_000,
                 jeonbuk: 30_000_000, jeonnam: 40_000_000,
-                nk_hwanghae: 50_000_000_000, nk_pyongyang: 100_000_000_000, nk_pyongbuk: 100_000_000_000, nk_east: 100_000_000_000, nk_north: 150_000_000_000 },
+                nk_hwanghae: 50_000_000_000, nk_pyongyang: 100_000_000_000, nk_pyongbuk: 100_000_000_000, nk_east: 100_000_000_000, nk_north: 150_000_000_000,
+                jp_kyushu: 200_000_000_000, jp_chugoku: 300_000_000_000, jp_shikoku: 100_000_000_000, jp_kansai: 500_000_000_000,
+                jp_chubu: 700_000_000_000, jp_kanto: 1_000_000_000_000, jp_tohoku: 500_000_000_000, jp_hokkaido: 300_000_000_000 },
   // 선로 구간(노선 × 지역) 가격 = km × 단가. 개량을 마친 노선이면 개량비도 함께
   secPerKm: { conv: 60_000, hs: 150_000 }, secMin: 500_000,
   // 역 가격 = 기본 + 실제 하루 승차 × 단가 (10만원 단위)
@@ -196,6 +224,7 @@ const freshState = () => ({
   debt: 0, negDays: 0, over: false, // 빚, 자금이 마이너스로 끝난 날 수, 파산
   totalRev: 0, shownLevel: 1, // 누적 운임 수입(레벨), 화면에서 알린 레벨
   mon: null, // 이번 달 누계(월 결산)
+  tunnel: null, // 한일 해저터널: { start, end, done }
 });
 const G = freshState();
 // 회사 레벨
@@ -237,6 +266,10 @@ const needsElec = (kind, lvl) => !!(CFG.kinds[kind].elec || CFG.kinds[kind].leve
 function edgeAllowed(e, kind, lvl = 0) {
   const K = CFG.kinds[kind];
   if (!K.tracks.includes(e.line.kind)) return false;
+  // 나라: 한국 열차는 한국(북한 포함) 선로, 일본 열차는 일본 선로만. 해저터널은 KTX·신칸센만, 개통 뒤에
+  const c = e.line.country || 'kr';
+  if (c === 'tunnel') { if (!K.tunnel || !G.tunnel?.done) return false; }
+  else if (c !== (K.country || 'kr')) return false;
   if (e.line.kind === 'hs' && level() < CFG.gate.hs && !edgeOwned(e)) return false;
   if (needsElec(kind, lvl) && !lineElec(e.line)) return false;
   return true;
@@ -393,7 +426,7 @@ function recommendTT(r) {
       const y = r.stB?.[b.id];
       if (y && y.board >= 3 && G.t > from) { x = y; hrs = (Math.min(G.t, to) - from) / 60; } else x = null;
     }
-    const maxHw = r.kind === 'metro' ? (b.id === 'am' || b.id === 'pm' ? 20 : 60) : (b.id === 'dawn' || b.id === 'night' ? 180 : 120);
+    const maxHw = CFG.kinds[r.kind].commute ? (b.id === 'am' || b.id === 'pm' ? 20 : 60) : (b.id === 'dawn' || b.id === 'night' ? 180 : 120);
     let hw;
     if (!x || hrs <= 0.2) hw = maxHw; // 기록 없음 = 승객이 거의 없는 시간
     else {
@@ -414,7 +447,7 @@ function recommendTT(r) {
   let N = Math.max(1, n); while (N < 300 && autoHw(r, N) > minRaw) N++;
   const base = autoHw(r, N), tier = refTier(r);
   const yb = r.yest?.board ? r.yest : r.st, yr = r.yest?.board ? (r.yestRev || 0) : (r.revToday || 0);
-  const fare = yr / Math.max(1, yb?.board || 0), runCost = km * (tier.perKm + (r.kind === 'ktx' ? CFG.hsTrackFeePerKm : 0));
+  const fare = yr / Math.max(1, yb?.board || 0), runCost = km * (tier.perKm + (CFG.kinds[r.kind].tracks.includes('hs') ? CFG.hsTrackFeePerKm : 0));
   for (const b of TT_BANDS) {
     const x = out.bands[b.id];
     let hw = Math.min(x.raw, base);
@@ -612,7 +645,7 @@ function rebuildNetwork() {
       const e = T.get(d) || { w: 0, opts: [] }; e.w += w; if (!e.opts.some(x => x.r === r)) e.opts.push({ r }); T.set(d, e);
     };
     for (const r of G.routes) {
-      if (!r.active || r.kind !== 'metro') continue;
+      if (!r.active || !CFG.kinds[r.kind].commute) continue;
       const q = 0.1 + 0.9 * Math.exp(-r.hw / C.freqMin);
       for (let i = 0; i < r.stops.length; i++) for (let j = i + 1; j < r.stops.length; j++) {
         const km = Math.abs(r.cumKm[j] - r.cumKm[i]); if (km < C.minKm || km > C.maxKm) continue;
@@ -903,6 +936,7 @@ function monthReport() {
 function startMonth() { G.mon = newMonth(); G.mon.startDay = G.day; for (const r of G.routes) r.mon = { pax: 0, rev: 0, cost: 0, left: 0 }; }
 function startNextDay() {
   G.day++; G.t = CFG.dayStartMin; G.today = newToday();
+  if (G.tunnel && !G.tunnel.done && G.day >= G.tunnel.end) finishTunnel();
   G.waiting = new Map(); spawnAcc.clear();
   G.pend = [];
   for (const t of G.trains) t.pax = [];
@@ -926,7 +960,7 @@ const FULL_OCC = 0.7;
 function recommendTrains(r, n, occ, st, rev, cost) {
   const C = cycleMinutes(r);
   // 배차 배율: 광역열차는 통근 승객이 대부분이라 배차에 훨씬 민감(통근 식), 나머지는 일반 수요 식
-  const fq = r.kind === 'metro' ? (h => 0.1 + 0.9 * Math.exp(-Math.min(h, 240) / CFG.commute.freqMin)) : (h => 0.35 + 0.85 * Math.exp(-Math.min(h, 240) / 90));
+  const fq = CFG.kinds[r.kind].commute ? (h => 0.1 + 0.9 * Math.exp(-Math.min(h, 240) / CFG.commute.freqMin)) : (h => 0.35 + 0.85 * Math.exp(-Math.min(h, 240) / 90));
   const D = st.board + (st.leftU || 0) + st.gave;
   let nMax = Infinity;
   for (const leg of r.legs) for (const e of leg.edges) {
@@ -1210,6 +1244,8 @@ function repay(amount) {
 function unlockRegion(id) {
   const c = CFG.unlockCost[id];
   if (G.unlocked.has(id)) return { err: '이미 열린 지역입니다' };
+  if (c == null) return { err: '해저터널이 개통되면 열립니다' };
+  if (id.startsWith('jp_') && !G.tunnel?.done) return { err: '한일 해저터널이 개통되어야 열 수 있습니다' };
   { const e = lvErr(CFG.gate.region[id] || 1); if (e) return { err: e }; }
   if (G.money < c) return { err: '돈이 부족합니다' };
   G.money -= c; G.today.bought += c; G.unlocked.add(id);
@@ -1217,6 +1253,29 @@ function unlockRegion(id) {
   return {};
 }
 // 지역이 열린 지역과 선로로 이어져 있는지
+// 한일 해저터널: Lv19 · 1조원 · 1년. 개통하면 터널 지역(쓰시마·이키)이 열리고 터널 선로는 저절로 내 것
+const tunnelLine = () => lines.find(l => (l.country || 'kr') === 'tunnel');
+function tunnelBlock() {
+  if (!tunnelLine()) return '해저터널 자료가 없습니다';
+  if (G.tunnel) return G.tunnel.done ? '이미 개통했습니다' : '공사 중입니다';
+  const e = lvErr(CFG.gate.tunnel); if (e) return e;
+  if (!G.unlocked.has('busan')) return '부산·울산 지역을 먼저 여세요';
+  if (G.money < CFG.tunnel.cost) return '돈이 부족합니다';
+  return null;
+}
+function startTunnel() {
+  const why = tunnelBlock(); if (why) return { err: why };
+  G.money -= CFG.tunnel.cost; G.today.bought += CFG.tunnel.cost;
+  G.tunnel = { start: G.day, end: G.day + CFG.tunnel.days, done: false };
+  return {};
+}
+function finishTunnel() {
+  G.tunnel.done = true; G.tunnelNews = true;
+  const l = tunnelLine(); G.unlocked.add(l.stations ? stations[l.edges[1].a].region : 'jp_tunnel');
+  for (const sc of l.sections) G.ownedSecs.add(sc.id);
+  for (const e of l.edges) for (const id of [e.a, e.b]) if (stations[id].region === stations[l.edges[1].a].region) G.ownedSt.add(id);
+  rebuildNetwork();
+}
 function regionReachable(id) {
   for (const e of edges) {
     const ra = stations[e.a].region, rb = stations[e.b].region;
@@ -1254,7 +1313,7 @@ const SAVE_KEY = 'korea-rail-save-v3'; // v3: 동대구역 + 무궁화 1대로 �
 function serialize() {
   return JSON.stringify({
     kindsVer: 2, money: G.money, totalRev: G.totalRev, shownLevel: G.shownLevel, debt: G.debt, negDays: G.negDays, over: G.over, day: G.day, rep: G.rep, unlocked: [...G.unlocked], lineUp: G.lineUp, ownedSecs: [...G.ownedSecs], ownedSt: [...G.ownedSt],
-    nextRouteNo: G.nextRouteNo, nextTrainId: G.nextTrainId, history: G.history,
+    nextRouteNo: G.nextRouteNo, nextTrainId: G.nextTrainId, history: G.history, tunnel: G.tunnel,
     mon: G.mon,
     routes: G.routes.map(r => ({ no: r.no, kind: r.kind, color: r.color, stops: r.stops, name: r.name, mon: r.mon, tt: r.tt, yest: r.yest, yestB: r.yestB, yestN: r.yestN, yestRev: r.yestRev, yestCost: r.yestCost })), // 어제 기록: 추천 열차 수용
     trains: G.trains.map(t => ({ id: t.id, no: t.no, kind: t.kind, lvl: t.lvl, route: t.route.no, i: t.i, dir: t.dir })),
@@ -1280,10 +1339,17 @@ function deserialize(s) {
   migrateKinds(o);
   // 누적 수입이 없는 예전 저장: 남아 있는 결산 기록으로 어림
   const estRev = (o.history || []).reduce((a, h) => a + (h.revenue || 0), 0) + (o.mon?.revenue || 0);
-  Object.assign(G, { money: o.money, totalRev: o.totalRev ?? estRev, shownLevel: Math.min(o.shownLevel ?? 99, levelOf(o.totalRev ?? estRev)), // 레벨 기준이 바뀌어 내려갔으면 지금 레벨로 debt: o.debt || 0, negDays: o.negDays || 0, over: !!o.over, day: o.day, rep: o.rep, unlocked: new Set(o.unlocked), lineUp: o.lineUp || {},
+  Object.assign(G, { money: o.money, totalRev: o.totalRev ?? estRev, shownLevel: Math.min(o.shownLevel ?? 99, levelOf(o.totalRev ?? estRev)) /* 레벨 기준이 바뀌어 내려갔으면 지금 레벨로 */, debt: o.debt || 0, negDays: o.negDays || 0, over: !!o.over, day: o.day, rep: o.rep, unlocked: new Set(o.unlocked), lineUp: o.lineUp || {},
     ownedSecs: new Set(o.ownedSecs || []), ownedSt: new Set(o.ownedSt || []),
-    nextRouteNo: o.nextRouteNo, nextTrainId: o.nextTrainId, history: o.history || [], t: CFG.dayStartMin, today: newToday(), waiting: new Map() });
+    nextRouteNo: o.nextRouteNo, nextTrainId: o.nextTrainId, history: o.history || [], t: CFG.dayStartMin, today: newToday(), waiting: new Map(), tunnel: o.tunnel || null });
   G.mon = o.mon || newMonth();
+  // v0.31~v0.34 불러오기 버그 복구: 날짜·연 지역이 처음 값으로 돌아갔던 저장 → 결산 기록·산 역/구간으로 되살림
+  { const last = Math.max(0, ...G.history.map(h => h.day || 0));
+    if (!(G.day > last)) G.day = last + 1;
+    G.unlocked.add(CFG.startRegion);
+    for (const id of G.ownedSt) if (stations[id]) G.unlocked.add(stations[id].region);
+    for (const id of G.ownedSecs) { const sc = secById.get(id); if (sc) G.unlocked.add(sc.region); }
+    if (G.rep == null) G.rep = CFG.repStart; }
   G.routes = [];
   for (const r of o.routes) { const legs = buildLegs(r.kind, r.stops); if (legs) G.routes.push({ ...r, legs }); }
   G.trains = [];
@@ -1313,7 +1379,7 @@ function setupNewGame() {
   rebuildNetwork();
 }
 
-root.SIM = { ttNeed, recommendTT, TT_BANDS, NICE_HW, ttOf, depsOf, planTrains, oneWayMin, autoHw, ttBuild, layoutAll, respaceRoute, spacingRatio, get commuteTable() { return commuteTable; }, CFG, D, G, level, levelOf, levelNeed, needTrain, lvErr, resetGame, routeDiag, upgradeBlock, dateOf, isMonthEnd, monthReport, startMonth, assetValue, creditGrade, loanLimit, canBorrow, borrow, repay, stations, byName, lines, edges, adj, sections, secById, edgeOwned, stOwned, secOwned, stationPrice, buyStation,
+root.SIM = { tunnelBlock, startTunnel, tunnelLine, ttNeed, recommendTT, TT_BANDS, NICE_HW, ttOf, depsOf, planTrains, oneWayMin, autoHw, ttBuild, layoutAll, respaceRoute, spacingRatio, get commuteTable() { return commuteTable; }, CFG, D, G, level, levelOf, levelNeed, needTrain, lvErr, resetGame, routeDiag, upgradeBlock, dateOf, isMonthEnd, monthReport, startMonth, assetValue, creditGrade, loanLimit, canBorrow, borrow, repay, stations, byName, lines, edges, adj, sections, secById, edgeOwned, stOwned, secOwned, stationPrice, buyStation,
   sectionPrice, buySection, missingSections, buySections, ownedKm, regionName, toKm, distKm, isOpen, lineElec, lineDbl, lineVmax, edgeOpen, edgeCap,
   kindOf, tierOf, needsElec, edgeAllowed, findPath, buildLegs, addRoute, routeTitle, routeKm, routeHasNonElec, routeOpen, routeTrains,
   legMinutes, edgeSpeed, cycleMinutes, headway, rideMinutes, rideKm, rebuildNetwork, planFrom, hourShare, peakAt, tick, satPct, closeDay, startNextDay,
