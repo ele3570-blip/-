@@ -122,22 +122,21 @@ const CFG = {
     { need: 3_200_000_000_000, desc: '중국 국경 개방(신의주–단둥, 남양–투먼) · 중국 동북 지역 · 중국 열차' },
     { need: 3_800_000_000_000, desc: '중국 화북 지역(베이징·톈진·산둥) · T열차 · CRH380A' },
     { need: 4_500_000_000_000, desc: '중국 화동·화중 지역(상하이·난징·우한)' },
-    { need: 5_300_000_000_000, desc: '중국 화남·서북·서남 지역(광저우·홍콩·시안·청두) · Z열차 · CR400AF' },
+    { need: 5_300_000_000_000, desc: '중국 화남·서북·서남 지역(광저우·홍콩·시안·청두) · Z열차 · CR400AF · KTX-청룡' },
     { need: 6_200_000_000_000, desc: '한일 해저터널 공사(1조원 · 1년) → 일본 규슈 지역 · 일본 열차' },
     { need: 7_200_000_000_000, desc: '일본 주고쿠·시코쿠 지역 · 113 시리즈 · 783 시리즈 · 100 시리즈' },
     { need: 8_300_000_000_000, desc: '일본 간사이 지역 · 885 시리즈 · CR450' },
-    { need: 9_500_000_000_000, desc: '일본 주부·간토 지역 · 223 시리즈 · 271 시리즈 · 300 시리즈' },
-    { need: 10_800_000_000_000, desc: '일본 도호쿠·홋카이도 지역 · N700S' },
-    { need: 12_500_000_000_000, desc: 'KTX-청룡' },
+    { need: 9_500_000_000_000, desc: '일본 주부·간토 지역 · 223 시리즈 · 271 시리즈 · 300 시리즈 · N700S (열차 등급 모두 열림)' },
+    { need: 10_800_000_000_000, desc: '일본 도호쿠·홋카이도 지역(마지막 지역)' },
   ],
   // 필요한 레벨(1부터). 열차는 '종류:등급'
   gate: {
     train: { 'local:0': 1, 'local:1': 3, 'local:2': 6, 'general:0': 6, 'general:1': 7, 'general:2': 9, 'general:3': 13,
-             'metro:0': 1, 'metro:1': 7, 'metro:2': 15, 'ktx:0': 9, 'ktx:1': 10, 'ktx:2': 11, 'ktx:3': 28,
+             'metro:0': 1, 'metro:1': 7, 'metro:2': 15, 'ktx:0': 9, 'ktx:1': 10, 'ktx:2': 11, 'ktx:3': 22,
              'cn_local:0': 19, 'cn_local:1': 20, 'cn_local:2': 22,
              'cn_hs:0': 19, 'cn_hs:1': 20, 'cn_hs:2': 22, 'cn_hs:3': 25,
              'jp_local:0': 23, 'jp_local:1': 24, 'jp_local:2': 26, 'jp_ltd:0': 23, 'jp_ltd:1': 24, 'jp_ltd:2': 25, 'jp_ltd:3': 26,
-             'shinkansen:0': 23, 'shinkansen:1': 24, 'shinkansen:2': 26, 'shinkansen:3': 27 },
+             'shinkansen:0': 23, 'shinkansen:1': 24, 'shinkansen:2': 26, 'shinkansen:3': 26 },
     region: { daegu: 1, gyeongbuk_n: 2, gyeongbuk_e: 3, gyeongnam: 4, busan: 5, chungbuk: 7, chungcheong: 8, capital: 11, gangwon: 13, jeonbuk: 15, jeonnam: 17,
               nk_hwanghae: 12, nk_pyongyang: 14, nk_pyongbuk: 16, nk_east: 16, nk_north: 18,
               cn_dongbei: 19, cn_huabei: 20, cn_huadong: 21, cn_huazhong: 21, cn_huanan: 22, cn_xibei: 22, cn_xinan: 22, // 중국: 국경(신의주·남양)에서 동북부터
@@ -154,7 +153,7 @@ const CFG = {
   // 선로·역·공사는 지수 infExp, 열차·등급 올리기는 trainExp(열차 1대가 버는 돈은 레벨이 올라도 크게 늘지 않아서 덜 오름)
   // upkeep: 산 선로·역의 하루 유지비 = 지금 값 × 비율
   price: { infExp: 0.85, trainExp: 0.5, trainMax: 30, upkeep: 0.0005, regionMul: { cn: 0.4 } }, // 중국은 공사비가 싸서 선로·역 × 0.4 // 열차 배율은 최대 30배(1대가 버는 돈으로 몇 달 안에 갚을 수 있게)
-  loanLevelMul: [0.5, 0.57, 0.63, 0.7, 0.77, 0.83, 0.9, 0.97, 1.03, 1.1, 1.17, 1.23, 1.3, 1.37, 1.43, 1.5, 1.57, 1.63, 1.7, 1.77, 1.83, 1.9, 1.97, 2.03, 2.1, 2.17, 2.23, 2.3], // 대출 한도 × 레벨 배율
+  loanLevelMul: [0.5, 0.57, 0.64, 0.71, 0.78, 0.85, 0.92, 0.98, 1.05, 1.12, 1.19, 1.26, 1.33, 1.4, 1.47, 1.54, 1.61, 1.68, 1.75, 1.82, 1.88, 1.95, 2.02, 2.09, 2.16, 2.23, 2.3], // 대출 한도 × 레벨 배율
   startDate: [2026, 1, 1], // 1일째 = 2026년 1월 1일. 실제 달력(달마다 28~31일), 달이 끝나면 월 결산
   // 은행 대출. 한도 = (기본 + 자산 × 비율) × 등급 배율, 이자는 하루 결산 때 남은 빚 × 하루 이자율
   loan: {
@@ -257,7 +256,7 @@ const freshState = () => ({
 });
 const G = freshState();
 // 물가 배율
-function levelGap(lv) { const L = CFG.levels, a = L[lv - 1]?.need ?? 0, b = L[lv]?.need ?? L[L.length - 1].need * 1.67; return Math.max(1, b - a); }
+function levelGap(lv) { const L = CFG.levels, a = L[lv - 1]?.need ?? 0, b = L[lv]?.need ?? a + (a - (L[lv - 2]?.need ?? 0)) * 1.3; return Math.max(1, b - a); } // 마지막 레벨은 앞 간격 × 1.3
 const priceMul = (lv, exp, max = Infinity) => Math.min(max, Math.max(1, Math.pow(levelGap(lv) / levelGap(1), exp)));
 const infMul = region => priceMul(CFG.gate.region[region] || 1, CFG.price.infExp) * (CFG.price.regionMul[region.split('_')[0]] || 1);
 // 열차 값·등급 올리는 값: 그 등급이 열리는 레벨의 배율(처음 값은 basePrice·baseUpgrade로 남김)
