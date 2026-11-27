@@ -402,7 +402,8 @@ const defaultTT = () => ({ auto: true, first: CFG.tt.first, last: CFG.tt.last, h
 const ttOf = r => r.tt || (r.tt = defaultTT());
 // 한쪽 종착역 출발 → 반대쪽 도착(분). 참고 열차 기준
 function oneWayMin(r, tier = refTier(r)) { let m = 0; for (const l of r.legs) m += legMinutes(l, tier); return m + CFG.dwellBase * Math.max(0, r.stops.length - 2); }
-function autoHw(r, n) { const raw = 2 * (oneWayMin(r) + CFG.tt.turnMin) / Math.max(1, n); return NICE_HW.find(x => x >= raw - 0.01) || 240; }
+// 자동 배차 간격: 가진 열차로 결행 없이 돌 수 있는 깔끔한 간격. 아주 긴 노선이면 4시간보다 길게(30분 단위로 올림)
+function autoHw(r, n) { const raw = 2 * (oneWayMin(r) + CFG.tt.turnMin) / Math.max(1, n); return NICE_HW.find(x => x >= raw - 0.01) || Math.ceil(raw / 30) * 30; }
 function bandAt(t) { return TT_BANDS.find(b => t >= b.from && t < b.to) || TT_BANDS[TT_BANDS.length - 1]; }
 function depsOf(tt) {
   const out = []; let t = tt.first;
@@ -1047,6 +1048,9 @@ function recommendTrains(r, n, occ, st, rev, cost) {
 function routeDiag(r) {
   const n = routeTrains(r).length;
   if (!n) return { level: 'none', label: '열차 없음', icon: '⚪', advice: '열차를 배차하세요' };
+  // 편도가 하루 운행 시간(첫차~막차)보다 길면: 하루 안에 못 오가서 결행이 생김 → 노선을 나누라고 알림
+  { const tt = ttOf(r); if (r.T && r.T.oneWay > tt.last - tt.first)
+    return { level: 'more', icon: '🟠', label: '노선이 너무 김', advice: `편도 ${Math.floor(r.T.oneWay / 60)}시간 ${Math.round(r.T.oneWay % 60)}분으로 하루 운행 시간(첫차~막차)보다 길어 결행이 생깁니다. 노선을 둘로 나누거나 더 빠른 열차·고속화 선로를 쓰세요`, n }; }
   // 직접 짠 시간표인데 열차가 모자라면: 결행이 생김
   if (r.tt && !r.tt.auto && r.T && n < r.T.need)
     return { level: 'more', icon: '🔴', label: '열차 부족(결행)', advice: `이 시간표는 열차 ${r.T.need}대가 필요한데 ${n}대뿐이라 결행이 생깁니다. 열차를 늘리거나 시간표 간격을 넓히세요`, n, rec: r.T.need, nMax: Infinity };
