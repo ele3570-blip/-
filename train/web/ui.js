@@ -102,11 +102,13 @@ const trackType = e => e.line.kind === 'hs' ? 'hs' : S.lineElec(e.line) ? 'elec'
 const REGION_COLOR = { daegu: '#fde2e4', gyeongbuk_e: '#fff1c1', gyeongbuk_n: '#e2f0cb', busan: '#cde7f0', gyeongnam: '#d8f3dc',
   chungcheong: '#ffe5d0', chungbuk: '#e4dcf5', capital: '#fbd6e8', gangwon: '#d3f0e8', jeonbuk: '#f6eac2', jeonnam: '#dbe7fb',
   nk_hwanghae: '#e9f5d0', nk_pyongyang: '#fde0d2', nk_pyongbuk: '#d9ecf7', nk_east: '#efe0f7', nk_north: '#fff0d6',
-  jp_kyushu: '#fde2e4', jp_chugoku: '#e2f0cb', jp_shikoku: '#cde7f0', jp_kansai: '#ffe5d0', jp_chubu: '#e4dcf5', jp_kanto: '#fbd6e8', jp_tohoku: '#d3f0e8', jp_hokkaido: '#dbe7fb' };
+  jp_kyushu: '#fde2e4', jp_chugoku: '#e2f0cb', jp_shikoku: '#cde7f0', jp_kansai: '#ffe5d0', jp_chubu: '#e4dcf5', jp_kanto: '#fbd6e8', jp_tohoku: '#d3f0e8', jp_hokkaido: '#dbe7fb',
+  cn_dongbei: '#fde2e4', cn_huabei: '#fff1c1', cn_huadong: '#e2f0cb', cn_huazhong: '#ffe5d0', cn_huanan: '#cde7f0', cn_xibei: '#f6eac2', cn_xinan: '#e4dcf5' };
 const REGION_INK = { daegu: '#be123c', gyeongbuk_e: '#a16207', gyeongbuk_n: '#4d7c0f', busan: '#0e7490', gyeongnam: '#15803d',
   chungcheong: '#c2410c', chungbuk: '#6d28d9', capital: '#be185d', gangwon: '#0f766e', jeonbuk: '#a16207', jeonnam: '#1d4ed8',
   nk_hwanghae: '#4d7c0f', nk_pyongyang: '#c2410c', nk_pyongbuk: '#0369a1', nk_east: '#7e22ce', nk_north: '#b45309',
-  jp_kyushu: '#be123c', jp_chugoku: '#4d7c0f', jp_shikoku: '#0e7490', jp_kansai: '#c2410c', jp_chubu: '#6d28d9', jp_kanto: '#be185d', jp_tohoku: '#0f766e', jp_hokkaido: '#1d4ed8', jp_tunnel: '#0369a1' };
+  jp_kyushu: '#be123c', jp_chugoku: '#4d7c0f', jp_shikoku: '#0e7490', jp_kansai: '#c2410c', jp_chubu: '#6d28d9', jp_kanto: '#be185d', jp_tohoku: '#0f766e', jp_hokkaido: '#1d4ed8', jp_tunnel: '#0369a1',
+  cn_dongbei: '#be123c', cn_huabei: '#a16207', cn_huadong: '#4d7c0f', cn_huazhong: '#c2410c', cn_huanan: '#0e7490', cn_xibei: '#a16207', cn_xinan: '#6d28d9' };
 const regionShapes = S.D.regions.filter(r => r.shape).map(r => ({ id: r.id, name: r.name,
   rings: r.shape.map(ring => ring.map(([lon, lat]) => S.toKm(lon, lat))), label: S.toKm(...r.label) }));
 const hatch = (() => {
@@ -405,7 +407,7 @@ function draw() {
     const { X, Y, ang } = trainScreen(t);
     const tier = S.tierOf(t), full = t.pax.length / tier.cap;
     ctx.save(); ctx.translate(X, Y); ctx.rotate(ang);
-    const fast = t.kind === 'ktx' || t.kind === 'shinkansen', w = fast ? 18 : 14, h = 8;
+    const fast = t.kind === 'ktx' || t.kind === 'shinkansen' || t.kind === 'cn_hs', w = fast ? 18 : 14, h = 8;
     ctx.fillStyle = tier.color; ctx.strokeStyle = t === hoverTrain || selected?.t === t ? '#111827' : '#fff'; ctx.lineWidth = 2;
     ctx.beginPath(); ctx.roundRect(-w / 2, -h / 2, w, h, fast ? [2, 5, 5, 2] : 2); ctx.fill(); ctx.stroke();
     // 승차율
@@ -432,7 +434,7 @@ function stationHtml(s) {
   const rs = S.servedBy.get(s.id) || [];
   const T = S.destTable.get(s.id);
   let h = `<div><b style="font-size:15px">${esc(s.name)}역</b> <span class="tag">${tierOfStation(s).name}</span> <span class="tag gray">${esc(S.regionName[s.region])}</span> ${open ? '' : '<span class="tag warn">미개방</span>'}</div>
-    <div class="muted">${s.est ? '북한 · 하루 승차 <b>추정</b>(도시 인구로)' : s.jp ? (s.region === 'jp_tunnel' ? '해저터널 가상 역 · 하루 승차' : '일본 · 하루 승차(실제를 한국과 균형 맞게 줄임)') : esc(s.si) + ' · 실제 하루 승차'} ${fmt(s.on)}명 · 하차 ${fmt(s.off)}명${s.ktx ? ` · KTX ${Math.round(s.ktx * 100)}%` : ''}</div>`;
+    <div class="muted">${s.cn ? '중국 · 하루 승차 <b>추정</b>(도시 인구로)' : s.est ? '북한 · 하루 승차 <b>추정</b>(도시 인구로)' : s.jp ? (s.region === 'jp_tunnel' ? '해저터널 가상 역 · 하루 승차' : '일본 · 하루 승차(실제를 한국과 균형 맞게 줄임)') : esc(s.si) + ' · 실제 하루 승차'} ${fmt(s.on)}명 · 하차 ${fmt(s.off)}명${s.ktx ? ` · KTX ${Math.round(s.ktx * 100)}%` : ''}</div>`;
   if (open && !S.stOwned(s)) h += `<div style="margin-top:6px"><button class="primary" data-buyst="${s.id}" ${G.money < S.stationPrice(s) ? 'disabled' : ''}>🏷 역 사기 ${won(S.stationPrice(s))}</button> <span class="muted">사야 열차를 세울 수 있습니다</span></div>`;
   if (open) {
     h += `<div style="margin-top:6px">🧍 기다리는 승객 <b>${fmt(q.length)}</b>명 · 지나는 노선 ${rs.length}개${T ? ` · 이어진 수요 ${Math.round(T.served * 100)}%` : ''}</div>`;
@@ -768,7 +770,8 @@ function applyAllRec() {
 function renderRoutes() {
   $('newRouteBtns').innerHTML = Object.entries(CFG.kinds).map(([k, K]) => { const need = S.needTrain(k, 0);
     const d = { local: '일반선(모든 선로)', general: '일반선(누리로부터 전철화)', metro: '전철화 선로', ktx: S.level() < CFG.gate.hs ? `전철화 선로(고속선 Lv${CFG.gate.hs})` : '고속선·전철화 선로·해저터널',
-      jp_local: '일본 재래선', jp_ltd: '일본 재래선(전철화)', jp_metro: '일본 재래선(전철화)', shinkansen: '일본 신칸센 선로·해저터널' }[k] || '';
+      jp_local: '일본 재래선', jp_ltd: '일본 재래선(전철화)', jp_metro: '일본 재래선(전철화)', shinkansen: '일본 신칸센 선로·해저터널',
+      cn_local: '중국 선로(운임 쌈)', cn_intercity: '중국 고속선(통근)', cn_hs: '중국 고속선·국경' }[k] || '';
     return `<button data-newroute="${k}" ${lvLocked(need) ? 'disabled' : ''}>${lvLocked(need) ? lockTag(need) : K.icon} 새 ${K.name}<br><span class="muted">${d}</span></button>`; }).join('');
   // 열차 종류별로 묶음(일반 · 광역 · 고속). 머리줄을 누르면 접기/펴기
   const card = r => {
@@ -959,6 +962,7 @@ function renderHelp() {
     · 🚂 완행열차: 비둘기호 → 통일호 → 무궁화호 (싸고 느림, 모든 선로)<br>
     · 🚆 일반열차: 새마을호 → 누리로 → ITX-새마을 → ITX-마음 (누리로부터 전철화 선로만)<br>
     · 🚈 광역열차: 대경선 같은 지역 통근열차. 전철화 선로만. 광역열차만 태우는 <b>통근 승객</b>(4~70km, 출퇴근 7~9시·17~19시에 몰림)이 따로 있고, 배차가 잦을수록(10~20분) 크게 늘어납니다. 대도시 주변(대구·대전·수도권)에서 유리<br>
+    · 🇨🇳 중국(Lv${CFG.gate.region.cn_dongbei}): 북한 신의주–단둥, 남양–투먼 국경으로 동북부터 차례로. 국경은 KTX와 중국 고속 동차만. 중국 선로는 중국 열차만(보통·쾌속, 도시간 동차, 고속 동차). 승객이 많지만 운임이 쌈. 노선 모양은 직선<br>
     · 🌊 한일 해저터널(Lv${CFG.gate.tunnel}, ${won(CFG.tunnel.cost)}, ${CFG.tunnel.days}일): 🗺️ 지역에서 공사. 개통하면 일본 지역을 규슈부터 차례로 열 수 있음. 터널은 KTX·신칸센만, 일본 선로는 일본 열차만(보통·쾌속, 특급, 통근전철, 신칸센)<br>
     · 🚄 고속열차: KTX → KTX-산천 → KTX-이음 → KTX-청룡. 고속선과 전철화된 일반선<br>
     · 선로 색: 파랑 = 고속선(KTX만), 초록 = 전철 일반선, 갈색 점선 = 비전철 일반선(완행열차·새마을호만). 노선을 누르면 지나는 선로 종류가 색 띠와 km로 나옵니다<br>
@@ -1103,7 +1107,7 @@ function planLink(a, b, kind) {
   let Q = (detour ? Qbuy : P) || Qbuy;
   let elec = [];
   // 전철화가 필요한 열차(광역·KTX·ITX-마음)인데 비전철 선로 때문에 막히면: 일반열차 길로 잇고 그 선로를 전철화까지 함께 제안
-  const baseK = CFG.kinds[kind].country === 'jp' ? 'jp_local' : 'local';
+  const baseK = { jp: 'jp_local', cn: 'cn_local' }[CFG.kinds[kind].country] || 'local';
   if (!Q && (CFG.kinds[kind].elec || kind === 'ktx')) {
     const Qg = S.findPath(a, b, baseK, true) || S.findPath(a, b, baseK, 'all');
     if (Qg && !(kind === 'ktx' && Qg.edges.some(e => e.line.kind === 'hs' && lvLocked(CFG.gate.hs)))) {
@@ -1133,11 +1137,12 @@ function planLink(a, b, kind) {
 // 왜 못 가는지: 전철화·고속선 레벨·선로 없음
 function whyNoLink(a, b, kind) {
   const K = CFG.kinds[kind];
-  { const jpA = !!stations[a].jp || stations[a].region === 'jp_tunnel', jpB = !!stations[b].jp || stations[b].region === 'jp_tunnel', jpK = K.country === 'jp';
-    if (jpA !== jpB && !K.tunnel) return `${josa(K.name, '은', '는')} 한일 해저터널을 지날 수 없습니다. 터널은 KTX·신칸센만 다닙니다`;
-    if (jpA !== jpB && !G.tunnel?.done) return '한일 해저터널이 아직 개통되지 않았습니다';
-    if (jpK && !jpA && !jpB) return `${josa(K.name, '은', '는')} 일본 선로만 다닙니다`;
-    if (!jpK && jpA && jpB) return `${josa(K.name, '은', '는')} 한국 열차라 일본 선로를 다닐 수 없습니다. 일본 열차를 쓰세요`; }
+  { const cty = s => s.jp || s.region === 'jp_tunnel' ? 'jp' : s.cn ? 'cn' : 'kr', A = cty(stations[a]), B = cty(stations[b]), k = K.country || 'kr';
+    const nm = { kr: '한국', jp: '일본', cn: '중국' };
+    if (A !== B && [A, B].includes('jp') && !K.tunnel) return `${josa(K.name, '은', '는')} 한일 해저터널을 지날 수 없습니다. 터널은 KTX·신칸센만 다닙니다`;
+    if (A !== B && [A, B].includes('jp') && !G.tunnel?.done) return '한일 해저터널이 아직 개통되지 않았습니다';
+    if (A !== B && [A, B].includes('cn') && kind !== 'ktx' && kind !== 'cn_hs') return `${josa(K.name, '은', '는')} 국경을 넘을 수 없습니다. 국경(신의주–단둥, 남양–투먼)은 KTX와 중국 고속 동차만 다닙니다`;
+    if (A === B && A !== k) return `${josa(K.name, '은', '는')} ${nm[k]} 열차라 ${nm[A]} 선로를 다닐 수 없습니다. ${nm[A]} 열차를 쓰세요`; }
   if (kind === 'ktx' && S.level() < CFG.gate.hs) {
     if (S.findPath(a, b, 'local', 'all')) return `KTX는 회사 레벨 ${CFG.gate.hs} 전까지 고속선을 못 쓰고, 전철화된 일반선으로는 이 두 역이 이어지지 않습니다`;
   }

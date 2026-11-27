@@ -63,6 +63,22 @@ const CFG = {
       { name: '300 시리즈', cars: 16, seats: 1323, cap: 280, vmax: 270, stopLoss: 2.8, perKm: 1_800, perDay: 680_000, fare: [8_400, 155], comfort: 30, upgrade: 20_000_000, color: '#2563eb' },
       { name: 'N700S', cars: 16, seats: 1319, cap: 290, vmax: 300, stopLoss: 2.4, perKm: 1_700, perDay: 650_000, fare: [8_400, 162], comfort: 36, upgrade: 30_000_000, color: '#0ea5e9' },
     ] },
+    // ── 중국(국경 개방 뒤): 중국 선로만. 승객은 많지만 운임이 쌈(한국의 약 60%). 정원은 실제 ÷ 5(입석 포함, 등급마다 오르도록)
+    cn_local: { name: '보통·쾌속(중국)', icon: '🚂', price: 1_500_000, tracks: ['hs', 'conv'], country: 'cn', levels: [
+      { name: '녹피차 K열차', cars: 16, seats: 1400, cap: 280, vmax: 120, stopLoss: 2.5, perKm: 120, perDay: 25_000, fare: [800, 30], comfort: 0, upgrade: 0, color: '#15803d' },
+      { name: 'T열차', cars: 18, seats: 1600, cap: 320, vmax: 140, stopLoss: 2.5, perKm: 150, perDay: 30_000, fare: [900, 33], comfort: 6, upgrade: 2_000_000, color: '#1d4ed8' },
+      { name: 'Z열차', cars: 18, seats: 1700, cap: 340, vmax: 160, stopLoss: 2.5, perKm: 170, perDay: 35_000, fare: [1_000, 36], comfort: 12, upgrade: 3_000_000, color: '#b91c1c' },
+    ] },
+    cn_intercity: { name: '도시간 동차(중국)', icon: '🚈', price: 2_500_000, tracks: ['hs'], country: 'cn', elec: true, commute: true, levels: [
+      { name: 'CRH6F', cars: 8, seats: 1500, cap: 300, vmax: 160, stopLoss: 1.2, perKm: 180, perDay: 45_000, fare: [1_000, 25], comfort: 2, upgrade: 0, color: '#0d9488' },
+      { name: 'CRH6A', cars: 8, seats: 1550, cap: 310, vmax: 200, stopLoss: 1.2, perKm: 200, perDay: 50_000, fare: [1_000, 27], comfort: 6, upgrade: 2_500_000, color: '#0891b2' },
+    ] },
+    cn_hs: { name: '고속 동차(중국)', icon: '🚄', price: 40_000_000, tracks: ['hs', 'conv'], country: 'cn', elec: true, levels: [
+      { name: 'CRH2', cars: 8, seats: 610, cap: 122, vmax: 250, stopLoss: 3.2, perKm: 1_400, perDay: 500_000, fare: [5_000, 90], comfort: 16, upgrade: 0, color: '#334155' },
+      { name: 'CRH380A', cars: 16, seats: 1061, cap: 212, vmax: 350, stopLoss: 3.0, perKm: 1_500, perDay: 520_000, fare: [5_000, 92], comfort: 22, upgrade: 15_000_000, color: '#1e40af' },
+      { name: 'CR400AF 푸싱하오', cars: 17, seats: 1283, cap: 257, vmax: 350, stopLoss: 2.6, perKm: 1_450, perDay: 500_000, fare: [5_000, 95], comfort: 30, upgrade: 20_000_000, color: '#b91c1c' },
+      { name: 'CR450', cars: 16, seats: 1300, cap: 264, vmax: 400, stopLoss: 2.2, perKm: 1_400, perDay: 480_000, fare: [5_000, 98], comfort: 36, upgrade: 30_000_000, color: '#7c3aed' },
+    ] },
   },
   hsTrackFeePerKm: 300,         // 고속선 선로 사용료(열차 1km당)
   dwellBase: 1.0, dwellPerPax: 0.02, // 역 정차 시간(분)
@@ -112,28 +128,32 @@ const CFG = {
     { need: 1_300_000_000_000, desc: '북한 평북·자강 · 강원·함남 지역' },
     { need: 1_800_000_000_000, desc: '광주·전남 지역' },
     { need: 2_400_000_000_000, desc: '북한 함북·양강 지역' },
-    { need: 3_200_000_000_000, desc: '한일 해저터널 공사(1조원 · 1년) → 일본 · 신칸센 등 일본 열차' },
+    { need: 3_200_000_000_000, desc: '중국 국경 개방(신의주–단둥, 남양–투먼) · 중국 열차' },
+    { need: 4_500_000_000_000, desc: '한일 해저터널 공사(1조원 · 1년) → 일본 · 신칸센 등 일본 열차' },
     { need: 6_000_000_000_000, desc: 'KTX-청룡' },
   ],
   // 필요한 레벨(1부터). 열차는 '종류:등급'
   gate: {
     train: { 'local:0': 1, 'local:1': 3, 'local:2': 6, 'general:0': 6, 'general:1': 7, 'general:2': 9, 'general:3': 13,
-             'metro:0': 1, 'metro:1': 7, 'metro:2': 15, 'ktx:0': 9, 'ktx:1': 10, 'ktx:2': 11, 'ktx:3': 20,
-             'jp_local:0': 19, 'jp_local:1': 19, 'jp_local:2': 20, 'jp_ltd:0': 19, 'jp_ltd:1': 19, 'jp_ltd:2': 20, 'jp_ltd:3': 20,
-             'jp_metro:0': 19, 'jp_metro:1': 19, 'jp_metro:2': 20, 'shinkansen:0': 19, 'shinkansen:1': 19, 'shinkansen:2': 20, 'shinkansen:3': 20 },
+             'metro:0': 1, 'metro:1': 7, 'metro:2': 15, 'ktx:0': 9, 'ktx:1': 10, 'ktx:2': 11, 'ktx:3': 21,
+             'cn_local:0': 19, 'cn_local:1': 19, 'cn_local:2': 20, 'cn_intercity:0': 19, 'cn_intercity:1': 20,
+             'cn_hs:0': 19, 'cn_hs:1': 19, 'cn_hs:2': 20, 'cn_hs:3': 21,
+             'jp_local:0': 20, 'jp_local:1': 20, 'jp_local:2': 21, 'jp_ltd:0': 20, 'jp_ltd:1': 20, 'jp_ltd:2': 21, 'jp_ltd:3': 21,
+             'jp_metro:0': 20, 'jp_metro:1': 20, 'jp_metro:2': 21, 'shinkansen:0': 20, 'shinkansen:1': 20, 'shinkansen:2': 21, 'shinkansen:3': 21 },
     region: { daegu: 1, gyeongbuk_n: 2, gyeongbuk_e: 3, gyeongnam: 4, busan: 5, chungbuk: 7, chungcheong: 8, capital: 11, gangwon: 13, jeonbuk: 15, jeonnam: 17,
               nk_hwanghae: 12, nk_pyongyang: 14, nk_pyongbuk: 16, nk_east: 16, nk_north: 18,
-              jp_kyushu: 19, jp_chugoku: 19, jp_shikoku: 19, jp_kansai: 19, jp_chubu: 19, jp_kanto: 19, jp_tohoku: 19, jp_hokkaido: 19 }, // 일본: 해저터널 개통 뒤 규슈부터 이어진 순서로 // 북한: 수도권(경의선 도라산)에서 개성으로
+              cn_dongbei: 19, cn_huabei: 19, cn_huadong: 19, cn_huazhong: 19, cn_huanan: 19, cn_xibei: 19, cn_xinan: 19, // 중국: 국경(신의주·남양)에서 동북부터
+              jp_kyushu: 20, jp_chugoku: 20, jp_shikoku: 20, jp_kansai: 20, jp_chubu: 20, jp_kanto: 20, jp_tohoku: 20, jp_hokkaido: 20 }, // 일본: 해저터널 개통 뒤 규슈부터 이어진 순서로 // 북한: 수도권(경의선 도라산)에서 개성으로
     work: { elec: 6, dbl: 7, speed: 13 },
     hs: 10,
-    tunnel: 19, // 한일 해저터널 공사
+    tunnel: 20, // 한일 해저터널 공사
   },
   tunnel: { cost: 1_000_000_000_000, days: 365 },
   // 물가: 늦게 열리는 것일수록 비쌈. 배율 = (그 레벨에서 다음 레벨까지 필요한 수입 ÷ Lv1의 것) ^ 지수
   // 선로·역·공사는 지수 infExp, 열차·등급 올리기는 trainExp(열차 1대가 버는 돈은 레벨이 올라도 크게 늘지 않아서 덜 오름)
   // upkeep: 산 선로·역의 하루 유지비 = 지금 값 × 비율
-  price: { infExp: 0.85, trainExp: 0.5, trainMax: 30, upkeep: 0.0005 }, // 열차 배율은 최대 30배(1대가 버는 돈으로 몇 달 안에 갚을 수 있게)
-  loanLevelMul: [0.5, 0.59, 0.69, 0.78, 0.88, 0.97, 1.07, 1.16, 1.26, 1.35, 1.45, 1.54, 1.64, 1.73, 1.83, 1.92, 2.02, 2.11, 2.21, 2.3], // 대출 한도 × 레벨 배율
+  price: { infExp: 0.85, trainExp: 0.5, trainMax: 30, upkeep: 0.0005, regionMul: { cn: 0.4 } }, // 중국은 공사비가 싸서 선로·역 × 0.4 // 열차 배율은 최대 30배(1대가 버는 돈으로 몇 달 안에 갚을 수 있게)
+  loanLevelMul: [0.5, 0.59, 0.68, 0.77, 0.86, 0.95, 1.04, 1.13, 1.22, 1.31, 1.4, 1.49, 1.58, 1.67, 1.76, 1.85, 1.94, 2.03, 2.12, 2.21, 2.3], // 대출 한도 × 레벨 배율
   startDate: [2026, 1, 1], // 1일째 = 2026년 1월 1일. 실제 달력(달마다 28~31일), 달이 끝나면 월 결산
   // 은행 대출. 한도 = (기본 + 자산 × 비율) × 등급 배율, 이자는 하루 결산 때 남은 빚 × 하루 이자율
   loan: {
@@ -153,7 +173,9 @@ const CFG = {
                 jeonbuk: 40_000_000_000, jeonnam: 60_000_000_000,
                 nk_hwanghae: 50_000_000_000, nk_pyongyang: 100_000_000_000, nk_pyongbuk: 100_000_000_000, nk_east: 100_000_000_000, nk_north: 150_000_000_000,
                 jp_kyushu: 200_000_000_000, jp_chugoku: 300_000_000_000, jp_shikoku: 100_000_000_000, jp_kansai: 500_000_000_000,
-                jp_chubu: 700_000_000_000, jp_kanto: 1_000_000_000_000, jp_tohoku: 500_000_000_000, jp_hokkaido: 300_000_000_000 },
+                jp_chubu: 700_000_000_000, jp_kanto: 1_000_000_000_000, jp_tohoku: 500_000_000_000, jp_hokkaido: 300_000_000_000,
+                cn_dongbei: 100_000_000_000, cn_huabei: 200_000_000_000, cn_huadong: 250_000_000_000, cn_huazhong: 250_000_000_000,
+                cn_huanan: 200_000_000_000, cn_xibei: 150_000_000_000, cn_xinan: 150_000_000_000 },
   // 선로 구간(노선 × 지역) 가격 = km × 단가. 개량을 마친 노선이면 개량비도 함께
   secPerKm: { conv: 60_000, hs: 150_000 }, secMin: 500_000,
   // 역 가격 = 기본 + 실제 하루 승차 × 단가 (10만원 단위)
@@ -235,7 +257,7 @@ const G = freshState();
 // 물가 배율
 function levelGap(lv) { const L = CFG.levels, a = L[lv - 1]?.need ?? 0, b = L[lv]?.need ?? L[L.length - 1].need * 1.67; return Math.max(1, b - a); }
 const priceMul = (lv, exp, max = Infinity) => Math.min(max, Math.max(1, Math.pow(levelGap(lv) / levelGap(1), exp)));
-const infMul = region => priceMul(CFG.gate.region[region] || 1, CFG.price.infExp);
+const infMul = region => priceMul(CFG.gate.region[region] || 1, CFG.price.infExp) * (CFG.price.regionMul[region.split('_')[0]] || 1);
 // 열차 값·등급 올리는 값: 그 등급이 열리는 레벨의 배율(처음 값은 basePrice·baseUpgrade로 남김)
 for (const [k, K] of Object.entries(CFG.kinds)) {
   if (K.basePrice == null) K.basePrice = K.price;
@@ -284,7 +306,7 @@ function edgeAllowed(e, kind, lvl = 0) {
   if (!K.tracks.includes(e.line.kind)) return false;
   // 나라: 한국 열차는 한국(북한 포함) 선로, 일본 열차는 일본 선로만. 해저터널은 KTX·신칸센만, 개통 뒤에
   const c = e.line.country || 'kr';
-  if (c === 'tunnel') { if (!K.tunnel || !G.tunnel?.done) return false; }
+  if (e.line.cross) { if (!e.line.cross.includes(kind) || (c === 'tunnel' && !G.tunnel?.done)) return false; } // 해저터널·국경: 정해진 열차만
   else if (c !== (K.country || 'kr')) return false;
   if (e.line.kind === 'hs' && level() < CFG.gate.hs && !edgeOwned(e)) return false;
   if (needsElec(kind, lvl) && !lineElec(e.line)) return false;

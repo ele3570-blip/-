@@ -181,11 +181,31 @@ JP_NAME = _jp_names()
 JP_LINES = [(lid, nm, k, e, d, v, ' '.join(JP_NAME[x] for x in seq.split())) for lid, nm, k, e, d, v, seq, _c in JP.JP_LINES]
 LINE_COUNTRY = {lid: c for lid, *_x, c in JP.JP_LINES}
 JP_COORD = {JP_NAME.get(k, k): (v[0], v[1]) for k, v in _jpc.items() if k in JP_NAME}
-ALL_LINES = LINES + NK_LINES + JP_LINES
+# 중국: 이름이 겹치면 '(중)'. 신의주·남양은 북한 쪽 국경역(같은 역)
+import cn_data as CN
+
+
+def _cn_names():
+    taken = set(NK_NAME.values()) | set(JP_NAME.values())
+    for *_x, seq in LINES: taken.update(seq.split())
+    out = {}
+    for *_x, seq, _c in CN.CN_LINES:
+        for s in seq.split():
+            out[s] = s if s not in CN.STATIONS or s not in taken else s + '(중)'
+    return out
+
+
+CN_NAME = _cn_names()
+CN_LINES = [(lid, nm, k, e, d, v, ' '.join(CN_NAME[x] for x in seq.split())) for lid, nm, k, e, d, v, seq, _c in CN.CN_LINES]
+LINE_COUNTRY.update({lid: c for lid, *_x, c in CN.CN_LINES})
+LINE_CROSS = {'jp_tunnel': ['ktx', 'shinkansen']}
+LINE_CROSS.update({lid: CN.CROSS[c] for lid, *_x, c in CN.CN_LINES if c in CN.CROSS})
+CN_COORD = {CN_NAME[k]: (v[0], v[1]) for k, v in CN.STATIONS.items() if k in CN_NAME}
+ALL_LINES = LINES + NK_LINES + JP_LINES + CN_LINES
 
 
 def all_coords():
-    c = dict(station_coords()); c.update(NK_COORD); c.update(JP_COORD); return c
+    c = dict(station_coords()); c.update(NK_COORD); c.update(JP_COORD); c.update(CN_COORD); return c
 
 
 def used_stations():
@@ -324,6 +344,25 @@ def main():
                          'region': reg, 'si': '', 'jp': 1})
         coord[s] = (lon, lat)
 
+    # 중국 역: 성 경계로 지역, 승객은 도시 인구로 추정해 중국 전체 = 한국 전체 × CN.TOTAL_RATIO
+    cadm = json.load(open(os.path.join(RAW, 'chn_adm1.geojson'), encoding='utf-8'))['features']
+    creg = {n: rid_ for rid_, _, ns in CN.CN_REGIONS for n in ns}
+    osm_c = {v: k for k, v in CN_NAME.items()}
+    cn_used = []
+    for *_x, seq in CN_LINES:
+        for s in seq.split():
+            if s not in idx and s not in cn_used: cn_used.append(s)
+    raw = {s: (CN.STATIONS[osm_c[s]][2] * 1e4 * CN.RIDE_RATE) ** CN.FLATTEN for s in cn_used}
+    cscale = kr_on * CN.TOTAL_RATIO / sum(raw.values())
+    print(f'중국 승객: 인구 추정^{CN.FLATTEN} × {cscale:.2f} → 한국 전체의 {CN.TOTAL_RATIO:.0%}', file=sys.stderr)
+    for s in cn_used:
+        lon, lat, _pop = CN.STATIONS[osm_c[s]]
+        on = round(raw[s] * cscale)
+        idx[s] = len(stations)
+        stations.append({'name': s, 'lon': lon, 'lat': lat, 'on': on, 'off': on, 'ktx': 0,
+                         'region': creg[locate(lon, lat, cadm)['shapeName']], 'si': '', 'cn': 1})
+        coord[s] = (lon, lat)
+
     # 검사: 이웃 역이 너무 멀거나 지그재그면 알림
     lines_out = []
     for lid, name, kind, elec, dbl, vmax, seq in ALL_LINES:
@@ -333,13 +372,14 @@ def main():
             g = GEOM.get(f'{lid}|{a}|{b}')
             d = g['km'] if g else km(coord[a], coord[b]) * CURVE[kind]
             geo.append(g['pts'] if g else None)
-            if not g and d > (90 if kind == 'hs' else 45): print(f'  ! {name} {a}-{b} {d:.0f}km', file=sys.stderr)
+            if not g and d > (90 if kind == 'hs' else 45) and lid not in LINE_COUNTRY: print(f'  ! {name} {a}-{b} {d:.0f}km', file=sys.stderr)
             segs.append(round(d, 1))
         for a, b, c in zip(ss, ss[1:], ss[2:]):
             if km(coord[a], coord[c]) < 0.6 * max(km(coord[a], coord[b]), km(coord[b], coord[c])):
                 print(f'  ! {name} 꺾임: {a}-{b}-{c}', file=sys.stderr)
         lines_out.append({'id': lid, 'name': name, 'kind': kind, 'elec': elec, 'dbl': dbl, 'vmax': vmax,
-                          'stations': [idx[s] for s in ss], 'km': segs, 'geom': geo, 'country': LINE_COUNTRY.get(lid, 'kr')})
+                          'stations': [idx[s] for s in ss], 'km': segs, 'geom': geo, 'country': LINE_COUNTRY.get(lid, 'kr'),
+                          **({'cross': LINE_CROSS[lid]} if lid in LINE_CROSS else {})})
 
     # 지도 배경: 시도 경계(단순화)
     land = []
@@ -354,13 +394,19 @@ def main():
             ring = p[0]
             if len(ring) < 8: continue
             land.append([[round(q[0], 3), round(q[1], 3)] for q in ring[::2]])
+    for f in cadm:  # 중국 성 경계(지역이 아닌 성도 땅으로 그림)
+        for p in polys(f['geometry']):
+            ring = p[0]
+            if len(ring) < 8: continue
+            land.append([[round(q[0], 2), round(q[1], 2)] for q in ring])
     for f in jadm:  # 일본 도 경계
         for p in polys(f['geometry']):
             ring = p[0]
             if len(ring) < 8: continue
             land.append([[round(q[0], 3), round(q[1], 3)] for q in ring[::2]])
     regions = ([{'id': r, 'name': n} for r, n, _ in REGIONS] + [{'id': r, 'name': n, 'nk': 1} for r, n, _ in NK.NK_REGIONS]
-               + [{'id': JP.TUNNEL_REGION[0], 'name': JP.TUNNEL_REGION[1], 'jp': 1, 'tunnel': 1}] + [{'id': r, 'name': n, 'jp': 1} for r, n, _ in JP.JP_REGIONS])
+               + [{'id': JP.TUNNEL_REGION[0], 'name': JP.TUNNEL_REGION[1], 'jp': 1, 'tunnel': 1}] + [{'id': r, 'name': n, 'jp': 1} for r, n, _ in JP.JP_REGIONS]
+               + [{'id': r, 'name': n, 'cn': 1} for r, n, _ in CN.CN_REGIONS])
     # 지도에 칠할 지역 모양: 시군구 경계를 지역별로 합침(shapely 필요. 없으면 생략)
     try:
         from shapely.geometry import shape, mapping
@@ -373,6 +419,8 @@ def main():
             parts.setdefault(adm_region[f['properties']['shapeName']], []).append(shape(f['geometry']).buffer(0))
         for f in jadm:
             parts.setdefault(jreg[f['properties']['shapeName']], []).append(shape(f['geometry']).buffer(0))
+        for f in cadm:
+            if f['properties']['shapeName'] in creg: parts.setdefault(creg[f['properties']['shapeName']], []).append(shape(f['geometry']).buffer(0))
         for r in regions:
             if not parts.get(r['id']):  # 해저터널: 지도에 칠할 땅 없음
                 r['shape'] = []; r['label'] = LABEL_FIX.get(r['id'], [129.55, 34.05]); continue
@@ -392,7 +440,7 @@ def main():
         print(f"  {r['name']}: 역 {len(ss)}, 하루 승차 {sum(s['on'] for s in ss):,}", file=sys.stderr)
 
     data = {'stations': stations, 'lines': lines_out, 'regions': regions, 'land': land,
-            'source': '한국철도공사 역별 승하차 현황(2025), KTX 역별 승하차(2023), 선로 © OpenStreetMap 기여자(ODbL), 북한 도 경계 geoBoundaries(WFP·OCHA ROAP, CC BY 3.0 IGO), 북한 승차는 인구로 추정, 일본 역별 승하차 국토교통성 국토수치정보(S12-24)·노선 N02-24, 일본 도 경계 geoBoundaries(OSM, ODbL)'}
+            'source': '한국철도공사 역별 승하차 현황(2025), KTX 역별 승하차(2023), 선로 © OpenStreetMap 기여자(ODbL), 북한 도 경계 geoBoundaries(WFP·OCHA ROAP, CC BY 3.0 IGO), 북한 승차는 인구로 추정, 일본 역별 승하차 국토교통성 국토수치정보(S12-24)·노선 N02-24, 일본 도 경계 geoBoundaries(OSM, ODbL), 중국 성 경계 geoBoundaries(Public Domain), 중국 승차는 도시 인구로 추정·노선은 직선'}
     with open(OUT, 'w', encoding='utf-8') as f:
         f.write('window.GAME_DATA = ' + json.dumps(data, ensure_ascii=False, separators=(',', ':')) + ';\n')
     print(f'→ {OUT} ({os.path.getsize(OUT):,} bytes)', file=sys.stderr)
