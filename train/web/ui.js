@@ -562,7 +562,7 @@ function diagHtml(r) {
   if (x.rec != null) {
     const d = x.rec - x.n, K = CFG.kinds[r.kind];
     const free = G.depot.filter(t => t.kind === r.kind && !S.canDispatch(t, r)).length, buyN = Math.max(0, d - free);
-    rec = `<div style="margin-top:4px">🚆 추천 열차 수 <b>약 ${x.rec}대</b> <span class="muted">(${x.peakBand ? `${x.recFrom === '어제' ? '어제 하루 중 가장 많이 필요했던' : '오늘 가장 붐비는'} ${x.peakBand} 시간대 기준 · ` : '하루 기준 · '}지금 ${x.n}대${x.capped ? ` · 선로 용량 한계 ${x.nMax}대` : ''})</span></div>`;
+    rec = `<div style="margin-top:4px">🚆 추천 열차 수 <b>약 ${x.rec}대</b> <span class="muted">(지난 ${x.recDays || 1}일 중 가장 많이 필요했던 날의 ${x.peakBand || ''} 시간대 기준 · ${x.recNext ? `다음 갱신 ${(d => `${d.m}/${d.d}(월)`)(S.dateOf(x.recNext))} · ` : ''}지금 ${x.n}대${x.capped ? ` · 선로 용량 한계 ${x.nMax}대` : ''})</span></div>`;
     if (d > 0) btn = `<button class="primary" data-setn="${r.no}:${x.rec}" style="margin-top:6px" ${buyN && G.money < buyN * K.price ? 'disabled' : ''}>＋ 추천대로 ${d}대 더 넣기${buyN ? ` (${buyN}대 구입 ${won(buyN * K.price)})` : ''}</button>`;
     else if (d < 0) btn = `<button data-setn="${r.no}:${x.rec}" style="margin-top:6px">－ 추천대로 ${-d}대 빼기 (차량기지로)</button>`;
   }

@@ -974,13 +974,38 @@ function monthReport() {
     rep: G.rep, money: G.money, debt: G.debt, grade: creditGrade(), routes, date: dateOf(M.startDay) };
 }
 function startMonth() { G.mon = newMonth(); G.mon.startDay = G.day; for (const r of G.routes) r.mon = { pax: 0, rev: 0, cost: 0, left: 0 }; }
+// 어제 하루 중 열차가 가장 많이 필요했던 시간대의 대수(시간대마다 그 시간대 몫 비용으로 이익이 가장 큰 대수 중 최대)
+function yesterdayPeak(r) {
+  if (!r.yestB || !r.yest || r.yest.board < 20) return null;
+  const n0 = r.yestN || routeTrains(r).length; if (!n0) return null;
+  const fare = (r.yestRev || 0) / r.yest.board, perDay = refTier(r).perDay * n0;
+  const dayCost = (r.yestCost || 0) + perDay, dayLen = CFG.dayEndMin - CFG.dayStartMin, occ = r.yest.seatKm ? r.yest.paxKm / r.yest.seatKm : 0.5;
+  let peak = null;
+  for (const b of TT_BANDS) {
+    const x = r.yestB[b.id]; if (!x || x.board < 10) continue;
+    const bl = Math.max(30, Math.min(b.to, CFG.dayEndMin) - Math.max(b.from, CFG.dayStartMin));
+    const o = recommendTrains(r, n0, x.seatKm ? x.paxKm / x.seatKm : occ, x, fare * x.board, dayCost * bl / dayLen);
+    if (!peak || o.rec > peak.rec) peak = { rec: o.rec, capped: o.capped, nMax: o.nMax, band: b.name };
+  }
+  return peak;
+}
+function updateRec(r) {
+  const p = yesterdayPeak(r); if (!p) return;
+  r.recHist = [...(r.recHist || []), { day: G.day - 1, ...p }].slice(-7);
+  const monday = dateOf().w === '월';
+  if (!r.recShown || monday) {
+    const top = r.recHist.reduce((a, x) => x.rec > a.rec ? x : a);
+    let k = 1; while (dateOf(G.day + k).w !== '월') k++;
+    r.recShown = { ...top, next: G.day + k };
+  }
+}
 function startNextDay() {
   G.day++; G.t = CFG.dayStartMin; G.today = newToday();
   if (G.tunnel && !G.tunnel.done && G.day >= G.tunnel.end) finishTunnel();
   G.waiting = new Map(); spawnAcc.clear();
   G.pend = [];
   for (const t of G.trains) t.pax = [];
-  for (const r of G.routes) { r.yest = r.st; r.st = null; r.yestB = r.stB; r.stB = null; r.yestN = routeTrains(r).length; r.yestRev = r.revToday || 0; r.yestCost = r.costToday || 0; r.paxToday = 0; r.revToday = 0; r.costToday = 0; r.leftToday = 0; r.cancelToday = 0; r.lastDep = {}; }
+  for (const r of G.routes) { r.yest = r.st; r.st = null; r.yestB = r.stB; r.stB = null; r.yestN = routeTrains(r).length; r.yestRev = r.revToday || 0; r.yestCost = r.costToday || 0; r.paxToday = 0; r.revToday = 0; r.costToday = 0; r.leftToday = 0; r.cancelToday = 0; r.lastDep = {};  updateRec(r); }
   layoutAll();
 }
 // 모든 노선 열차를 시간표 첫 편에 맞춰 종착역에 배치
@@ -1035,26 +1060,9 @@ function routeDiag(r) {
   const dayFrac = useY ? 1 : Math.max(0.05, (G.t - CFG.dayStartMin) / (CFG.dayEndMin - CFG.dayStartMin));
   const rv = useY ? (r.yestRev || 0) : (r.revToday || 0), cs = (useY ? (r.yestCost || 0) : (r.costToday || 0)) + routeTrains(r).reduce((a, t) => a + tierOf(t).perDay, 0) * dayFrac;
   const base = { n, occ, wait, gaveRate, fullRate, st, hw, hw1, hwm, from: useY ? '어제' : '오늘', ...recommendTrains(r, n, occ, st, rv, cs) };
-  // 추천 대수 = 어제 하루 중 열차가 가장 많이 필요했던 시간대 기준(하루 내내 같은 값). 어제 기록이 없으면(첫날) 오늘 지금까지
-  // 시간대마다 그 시간대 몫의 비용으로 이익이 가장 큰 대수를 구해 그중 최대
-  { const hasY = r.yest && r.yest.board >= 20; // 운임·하루 비용은 하루를 다 채운 어제 기록이 있으면 그것으로(아침 기록은 비용이 덜 잡힘)
-    const fare = hasY ? (r.yestRev || 0) / r.yest.board : rv / Math.max(1, st.board);
-    const dayCost = hasY ? (r.yestCost || 0) + routeTrains(r).reduce((a, t) => a + tierOf(t).perDay, 0) : cs / dayFrac, dayLen = CFG.dayEndMin - CFG.dayStartMin, cur = bandAt(G.t).id;
-    const useYB = r.yestB && TT_BANDS.some(b => (r.yestB[b.id]?.board || 0) >= 10);
-    const n0 = useYB ? (r.yestN || n) : n; // 어제 기록은 어제 열차 수로 잰 것
-    const dayCost0 = dayCost * n0 / n;
-    // 어제 기준 값은 그날 처음 계산한 값을 하루 동안 그대로(열차를 늘려도 바뀌지 않게). 정차역을 바꾸면 다시 계산
-    const key = `${G.day}|${r.stops.join()}|${r.kind}`;
-    let peak = useYB && r.recCache?.key === key ? r.recCache.peak : null;
-    if (!peak) for (const [B, isT] of useYB ? [[r.yestB, false]] : [[r.stB, true]]) if (B) for (const b of TT_BANDS) {
-      const x = B[b.id]; if (!x || x.board < (isT && b.id === cur ? 20 : 10)) continue;
-      const bl = Math.max(30, Math.min(b.to, CFG.dayEndMin) - Math.max(b.from, CFG.dayStartMin));
-      const o = recommendTrains(r, n0, x.seatKm ? x.paxKm / x.seatKm : occ, x, fare * x.board, dayCost0 * bl / dayLen);
-      if (!peak || o.rec > peak.rec) peak = { ...o, band: b.name };
-    }
-    if (useYB && peak) r.recCache = { key, peak };
-    if (useYB && peak) Object.assign(base, { rec: peak.rec, capped: peak.capped, nMax: peak.nMax, peakBand: peak.band, recFrom: '어제' });
-    else if (peak && peak.rec > base.rec) Object.assign(base, { rec: peak.rec, capped: peak.capped, peakBand: peak.band, recFrom: '오늘' }); }
+  // 추천 대수 = 지난 7일 중 열차가 가장 많이 필요했던 날·시간대 기준. 매주 월요일에만 바뀜(그 사이엔 그대로)
+  if (r.recShown) Object.assign(base, { rec: r.recShown.rec, capped: r.recShown.capped, nMax: r.recShown.nMax, peakBand: r.recShown.band, recFrom: 'week', recDays: r.recHist?.length || 0, recNext: r.recShown.next });
+  else return { level: 'wait', label: '집계 중', icon: '⏳', advice: '하루 운행 기록을 모으는 중입니다. 내일부터 추천 열차 수를 알려 드립니다', n };
   // 판정은 추천 대수와 같은 방향으로: 추천이 지금보다 많으면 부족, 적으면 남음
   const { rec } = base, diff = rec - n, near = Math.abs(diff) <= Math.max(1, Math.round(n * 0.15));
   const lossy = base.recProfit < 0;
@@ -1189,7 +1197,7 @@ function setRouteStops(r, stops) {
   if (stops.some(id => !stOwned(id))) return { err: '사지 않은 역이 있습니다' };
   const legs = buildLegs(r.kind, stops);
   if (!legs) return { err: '이을 수 없는 역이 있습니다' };
-  r.stops = stops; r.legs = legs;
+  r.stops = stops; r.legs = legs; r.recHist = []; r.recShown = null; // 정차역이 바뀌면 추천은 처음부터
   for (const t of routeTrains(r)) { t.i = Math.min(t.i, stops.length - 1); t.dir = t.i === stops.length - 1 ? -1 : t.dir; t.legT = 0; t.legDur = null; t.pax = []; }
   rebuildNetwork();
   return {};
@@ -1383,7 +1391,7 @@ function serialize() {
     kindsVer: 2, money: G.money, totalRev: G.totalRev, shownLevel: G.shownLevel, debt: G.debt, negDays: G.negDays, over: G.over, day: G.day, rep: G.rep, unlocked: [...G.unlocked], lineUp: G.lineUp, ownedSecs: [...G.ownedSecs], ownedSt: [...G.ownedSt],
     nextRouteNo: G.nextRouteNo, nextTrainId: G.nextTrainId, history: G.history, tunnel: G.tunnel, licenses: [...G.licenses],
     mon: G.mon,
-    routes: G.routes.map(r => ({ no: r.no, kind: r.kind, color: r.color, stops: r.stops, name: r.name, mon: r.mon, tt: r.tt, yest: r.yest, yestB: r.yestB, yestN: r.yestN, yestRev: r.yestRev, yestCost: r.yestCost })), // 어제 기록: 추천 열차 수용
+    routes: G.routes.map(r => ({ no: r.no, kind: r.kind, color: r.color, stops: r.stops, name: r.name, mon: r.mon, tt: r.tt, yest: r.yest, yestB: r.yestB, yestN: r.yestN, yestRev: r.yestRev, yestCost: r.yestCost, recHist: r.recHist, recShown: r.recShown })), // 어제 기록·추천 열차 수
     trains: G.trains.map(t => ({ id: t.id, no: t.no, kind: t.kind, lvl: t.lvl, route: t.route.no, i: t.i, dir: t.dir, paid: t.paid })),
     depot: G.depot.map(t => ({ id: t.id, no: t.no, kind: t.kind, lvl: t.lvl, paid: t.paid })),
   });
