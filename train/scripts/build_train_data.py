@@ -320,9 +320,14 @@ def main():
     # 북한 승객: 인구 추정을 한국 전체 승차 × NK.TOTAL_RATIO 가 되도록 맞춤(한국보다 조금 적게)
     kr_on = sum(st['on'] for st in stations if not st.get('est'))
     nk_st = [st for st in stations if st.get('est')]
-    for st in nk_st: st['on'] = st['on'] ** NK.FLATTEN  # 큰 도시가 너무 커지지 않게(평양이 서울보다 크지 않도록) 조금 눌러 줌
-    nk_scale = kr_on * NK.TOTAL_RATIO / sum(st['on'] for st in nk_st)
-    for st in nk_st: st['on'] = st['off'] = round(st['on'] * nk_scale)
+    # 인구를 모르는 작은 역은 소형역(하루 SMALL_ON명), 나머지(도시 역)가 남은 승객을 인구^FLATTEN 비율로 나눔
+    small = [st for st in nk_st if st['on'] == NK.SMALL]
+    big = [st for st in nk_st if st['on'] != NK.SMALL]
+    for st in small: st['on'] = st['off'] = NK.SMALL_ON
+    rest = kr_on * NK.TOTAL_RATIO - NK.SMALL_ON * len(small)
+    w = {id(st): st['on'] ** NK.FLATTEN for st in big}
+    nk_scale = rest / sum(w.values())
+    for st in big: st['on'] = st['off'] = round(w[id(st)] * nk_scale)
     print(f'북한 승객: 인구 추정 × {nk_scale:.2f} → 한국 전체의 {NK.TOTAL_RATIO:.0%}', file=sys.stderr)
     # 일본 역: 도(都道府県) 경계로 지역, 승객은 한국 전체 승차 × JP.TOTAL_RATIO 가 되도록 줄임(한국보다 조금 많게)
     jadm = json.load(open(os.path.join(RAW, 'jpn_adm1.geojson'), encoding='utf-8'))['features']
@@ -338,7 +343,7 @@ def main():
     for s in jp_used:
         lon, lat, ps = _jpc[osm_j[s]]
         reg = JP.TUNNEL_REGION[0] if osm_j[s] in ('쓰시마', '이키') else jreg[locate(lon, lat, jadm)['shapeName']]
-        on = max(50, round(ps * jscale))
+        on = max(JP.MIN_ON, round(ps * jscale))
         idx[s] = len(stations)
         stations.append({'name': s, 'lon': round(lon, 5), 'lat': round(lat, 5), 'on': on, 'off': on, 'ktx': 0,
                          'region': reg, 'si': '', 'jp': 1})

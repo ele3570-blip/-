@@ -770,8 +770,8 @@ function applyAllRec() {
 function renderRoutes() {
   $('newRouteBtns').innerHTML = Object.entries(CFG.kinds).map(([k, K]) => { const need = S.needTrain(k, 0);
     const d = { local: '일반선(모든 선로)', general: '일반선(누리로부터 전철화)', metro: '전철화 선로', ktx: S.level() < CFG.gate.hs ? `전철화 선로(고속선 Lv${CFG.gate.hs})` : '고속선·전철화 선로·해저터널',
-      jp_local: '일본 재래선', jp_ltd: '일본 재래선(전철화)', jp_metro: '일본 재래선(전철화)', shinkansen: '일본 신칸센 선로·해저터널',
-      cn_local: '중국 선로(운임 쌈)', cn_intercity: '중국 고속선(통근)', cn_hs: '중국 고속선·국경' }[k] || '';
+      jp_local: '일본 재래선', jp_ltd: '일본 재래선(전철화)', shinkansen: '일본 신칸센 선로·해저터널',
+      cn_local: '중국 선로(운임 쌈)', cn_hs: '중국 고속선·국경' }[k] || '';
     return `<button data-newroute="${k}" ${lvLocked(need) ? 'disabled' : ''}>${lvLocked(need) ? lockTag(need) : K.icon} 새 ${K.name}<br><span class="muted">${d}</span></button>`; }).join('');
   // 열차 종류별로 묶음(일반 · 광역 · 고속). 머리줄을 누르면 접기/펴기
   const card = r => {
@@ -962,8 +962,8 @@ function renderHelp() {
     · 🚂 완행열차: 비둘기호 → 통일호 → 무궁화호 (싸고 느림, 모든 선로)<br>
     · 🚆 일반열차: 새마을호 → 누리로 → ITX-새마을 → ITX-마음 (누리로부터 전철화 선로만)<br>
     · 🚈 광역열차: 대경선 같은 지역 통근열차. 전철화 선로만. 광역열차만 태우는 <b>통근 승객</b>(4~70km, 출퇴근 7~9시·17~19시에 몰림)이 따로 있고, 배차가 잦을수록(10~20분) 크게 늘어납니다. 대도시 주변(대구·대전·수도권)에서 유리<br>
-    · 🇨🇳 중국(Lv${CFG.gate.region.cn_dongbei}): 북한 신의주–단둥, 남양–투먼 국경으로 동북부터 차례로. 국경은 KTX와 중국 고속 동차만. 중국 선로는 중국 열차만(보통·쾌속, 도시간 동차, 고속 동차). 승객이 많지만 운임이 쌈. 노선 모양은 직선<br>
-    · 🌊 한일 해저터널(Lv${CFG.gate.tunnel}, ${won(CFG.tunnel.cost)}, ${CFG.tunnel.days}일): 🗺️ 지역에서 공사. 개통하면 일본 지역을 규슈부터 차례로 열 수 있음. 터널은 KTX·신칸센만, 일본 선로는 일본 열차만(보통·쾌속, 특급, 통근전철, 신칸센)<br>
+    · 🇨🇳 중국(Lv${CFG.gate.region.cn_dongbei}): 북한 신의주–단둥, 남양–투먼 국경으로 동북부터 차례로. 국경은 KTX와 중국 고속 동차만. 중국 선로는 중국 열차만(보통·쾌속, 고속 동차). 통근 승객(광역열차)은 한국에만. 승객이 많지만 운임이 쌈. 노선 모양은 직선<br>
+    · 🌊 한일 해저터널(Lv${CFG.gate.tunnel}, ${won(CFG.tunnel.cost)}, ${CFG.tunnel.days}일): 🗺️ 지역에서 공사. 개통하면 일본 지역을 규슈부터 차례로 열 수 있음. 터널은 KTX·신칸센만, 일본 선로는 일본 열차만(보통·쾌속, 특급, 신칸센)<br>
     · 🚄 고속열차: KTX → KTX-산천 → KTX-이음 → KTX-청룡. 고속선과 전철화된 일반선<br>
     · 선로 색: 파랑 = 고속선(KTX만), 초록 = 전철 일반선, 갈색 점선 = 비전철 일반선(완행열차·새마을호만). 노선을 누르면 지나는 선로 종류가 색 띠와 km로 나옵니다<br>
     · 선로마다 시간당 다닐 수 있는 열차 수가 정해져 있습니다(단선 ${CFG.capSingle} · 복선 ${CFG.capDouble} · 고속선 ${CFG.capHs}). 넘치면 빨갛게 표시되고 느려집니다<br>
@@ -1582,7 +1582,7 @@ function tunnelNews() {
   G.paused = true; setSpeedUI();
   showModal(`<h2 style="margin:0 0 8px">🌊 한일 해저터널 개통!</h2>
     <p>부산–쓰시마–이키–가라쓰–하카타 해저터널이 열렸습니다. 터널은 <b>KTX와 신칸센</b>만 다닐 수 있습니다.</p>
-    <p>🗺️ 지역에서 <b>규슈</b>부터 일본 지역을 열고, 일본 노선에는 일본 열차(보통·쾌속, 특급, 통근전철, 신칸센)를 넣으세요.</p>
+    <p>🗺️ 지역에서 <b>규슈</b>부터 일본 지역을 열고, 일본 노선에는 일본 열차(보통·쾌속, 특급, 신칸센)를 넣으세요.</p>
     <button class="primary" id="askNo" style="width:100%">좋아요</button>`);
   $('askNo').onclick = () => { hideModal(); G.paused = false; setSpeedUI(); };
 }

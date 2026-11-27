@@ -52,11 +52,6 @@ const CFG = {
       { name: '885 시리즈 소닉(중련)', cars: 12, seats: 600, cap: 120, vmax: 130, stopLoss: 1.6, perKm: 210, perDay: 40_000, fare: [3_600, 105], comfort: 24, upgrade: 4_000_000, color: '#1d4ed8' },
       { name: '271 시리즈 하루카', cars: 9, seats: 650, cap: 130, vmax: 130, stopLoss: 1.5, perKm: 190, perDay: 38_000, fare: [3_800, 110], comfort: 28, upgrade: 4_500_000, color: '#7c3aed' },
     ] },
-    jp_metro: { name: '통근전철(일본)', icon: '🚇', price: 2_500_000, tracks: ['conv'], country: 'jp', elec: true, commute: true, levels: [
-      { name: '103 시리즈', cars: 10, seats: 1440, cap: 288, vmax: 100, stopLoss: 1.0, perKm: 180, perDay: 45_000, fare: [1_500, 40], comfort: 0, upgrade: 0, color: '#ea580c' },
-      { name: '205 시리즈', cars: 10, seats: 1500, cap: 300, vmax: 110, stopLoss: 1.0, perKm: 200, perDay: 50_000, fare: [1_500, 43], comfort: 3, upgrade: 2_000_000, color: '#16a34a' },
-      { name: 'E233 시리즈', cars: 10, seats: 1580, cap: 316, vmax: 120, stopLoss: 1.0, perKm: 220, perDay: 55_000, fare: [1_500, 46], comfort: 6, upgrade: 2_500_000, color: '#0284c7' },
-    ] },
     shinkansen: { name: '신칸센', icon: '🚅', price: 40_000_000, tracks: ['hs'], country: 'jp', elec: true, tunnel: true, levels: [
       { name: '0 시리즈', cars: 16, seats: 1340, cap: 268, vmax: 210, stopLoss: 3.5, perKm: 2_000, perDay: 750_000, fare: [8_400, 145], comfort: 18, upgrade: 0, color: '#1e40af' },
       { name: '100 시리즈', cars: 16, seats: 1321, cap: 272, vmax: 230, stopLoss: 3.2, perKm: 1_900, perDay: 720_000, fare: [8_400, 150], comfort: 24, upgrade: 15_000_000, color: '#1d4ed8' },
@@ -68,10 +63,6 @@ const CFG = {
       { name: '녹피차 K열차', cars: 16, seats: 1400, cap: 280, vmax: 120, stopLoss: 2.5, perKm: 120, perDay: 25_000, fare: [800, 30], comfort: 0, upgrade: 0, color: '#15803d' },
       { name: 'T열차', cars: 18, seats: 1600, cap: 320, vmax: 140, stopLoss: 2.5, perKm: 150, perDay: 30_000, fare: [900, 33], comfort: 6, upgrade: 2_000_000, color: '#1d4ed8' },
       { name: 'Z열차', cars: 18, seats: 1700, cap: 340, vmax: 160, stopLoss: 2.5, perKm: 170, perDay: 35_000, fare: [1_000, 36], comfort: 12, upgrade: 3_000_000, color: '#b91c1c' },
-    ] },
-    cn_intercity: { name: '도시간 동차(중국)', icon: '🚈', price: 2_500_000, tracks: ['hs'], country: 'cn', elec: true, commute: true, levels: [
-      { name: 'CRH6F', cars: 8, seats: 1500, cap: 300, vmax: 160, stopLoss: 1.2, perKm: 180, perDay: 45_000, fare: [1_000, 25], comfort: 2, upgrade: 0, color: '#0d9488' },
-      { name: 'CRH6A', cars: 8, seats: 1550, cap: 310, vmax: 200, stopLoss: 1.2, perKm: 200, perDay: 50_000, fare: [1_000, 27], comfort: 6, upgrade: 2_500_000, color: '#0891b2' },
     ] },
     cn_hs: { name: '고속 동차(중국)', icon: '🚄', price: 40_000_000, tracks: ['hs', 'conv'], country: 'cn', elec: true, levels: [
       { name: 'CRH2', cars: 8, seats: 610, cap: 122, vmax: 250, stopLoss: 3.2, perKm: 1_400, perDay: 500_000, fare: [5_000, 90], comfort: 16, upgrade: 0, color: '#334155' },
@@ -136,10 +127,10 @@ const CFG = {
   gate: {
     train: { 'local:0': 1, 'local:1': 3, 'local:2': 6, 'general:0': 6, 'general:1': 7, 'general:2': 9, 'general:3': 13,
              'metro:0': 1, 'metro:1': 7, 'metro:2': 15, 'ktx:0': 9, 'ktx:1': 10, 'ktx:2': 11, 'ktx:3': 21,
-             'cn_local:0': 19, 'cn_local:1': 19, 'cn_local:2': 20, 'cn_intercity:0': 19, 'cn_intercity:1': 20,
+             'cn_local:0': 19, 'cn_local:1': 19, 'cn_local:2': 20,
              'cn_hs:0': 19, 'cn_hs:1': 19, 'cn_hs:2': 20, 'cn_hs:3': 21,
              'jp_local:0': 20, 'jp_local:1': 20, 'jp_local:2': 21, 'jp_ltd:0': 20, 'jp_ltd:1': 20, 'jp_ltd:2': 21, 'jp_ltd:3': 21,
-             'jp_metro:0': 20, 'jp_metro:1': 20, 'jp_metro:2': 21, 'shinkansen:0': 20, 'shinkansen:1': 20, 'shinkansen:2': 21, 'shinkansen:3': 21 },
+             'shinkansen:0': 20, 'shinkansen:1': 20, 'shinkansen:2': 21, 'shinkansen:3': 21 },
     region: { daegu: 1, gyeongbuk_n: 2, gyeongbuk_e: 3, gyeongnam: 4, busan: 5, chungbuk: 7, chungcheong: 8, capital: 11, gangwon: 13, jeonbuk: 15, jeonnam: 17,
               nk_hwanghae: 12, nk_pyongyang: 14, nk_pyongbuk: 16, nk_east: 16, nk_north: 18,
               cn_dongbei: 19, cn_huabei: 19, cn_huadong: 19, cn_huazhong: 19, cn_huanan: 19, cn_xibei: 19, cn_xinan: 19, // 중국: 국경(신의주·남양)에서 동북부터
@@ -1388,6 +1379,9 @@ function migrateKinds(o) {
 function deserialize(s) {
   const o = JSON.parse(s);
   migrateKinds(o);
+  // 통근 열차는 한국에만: 예전 저장의 일본 통근전철·중국 도시간 동차는 그 나라 보통 열차(가장 낮은 등급)로
+  { const gone = { jp_metro: 'jp_local', cn_intercity: 'cn_local' }, fix = t => { if (gone[t.kind]) { t.kind = gone[t.kind]; t.lvl = 0; delete t.no; delete t.paid; } };
+    o.trains.forEach(fix); o.depot.forEach(fix); for (const r of o.routes) if (gone[r.kind]) r.kind = gone[r.kind]; }
   // 누적 수입이 없는 예전 저장: 남아 있는 결산 기록으로 어림
   const estRev = (o.history || []).reduce((a, h) => a + (h.revenue || 0), 0) + (o.mon?.revenue || 0);
   Object.assign(G, { money: o.money, totalRev: o.totalRev ?? estRev, shownLevel: Math.min(o.shownLevel ?? 99, levelOf(o.totalRev ?? estRev)) /* 레벨 기준이 바뀌어 내려갔으면 지금 레벨로 */, debt: o.debt || 0, negDays: o.negDays || 0, over: !!o.over, day: o.day, rep: o.rep, unlocked: new Set(o.unlocked), lineUp: o.lineUp || {},
