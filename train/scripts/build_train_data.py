@@ -297,17 +297,23 @@ def main():
                              'region': adm_region[pr['shapeName']], 'si': '', 'est': 1})
             coord[s] = (lon, lat)
 
-    # 일본 역: 도(都道府県) 경계로 지역, 승객은 한국 전체 승차와 같아지도록 줄임
+    # 북한 승객: 인구 추정을 한국 전체 승차 × NK.TOTAL_RATIO 가 되도록 맞춤(한국보다 조금 적게)
+    kr_on = sum(st['on'] for st in stations if not st.get('est'))
+    nk_st = [st for st in stations if st.get('est')]
+    for st in nk_st: st['on'] = st['on'] ** NK.FLATTEN  # 큰 도시가 너무 커지지 않게(평양이 서울보다 크지 않도록) 조금 눌러 줌
+    nk_scale = kr_on * NK.TOTAL_RATIO / sum(st['on'] for st in nk_st)
+    for st in nk_st: st['on'] = st['off'] = round(st['on'] * nk_scale)
+    print(f'북한 승객: 인구 추정 × {nk_scale:.2f} → 한국 전체의 {NK.TOTAL_RATIO:.0%}', file=sys.stderr)
+    # 일본 역: 도(都道府県) 경계로 지역, 승객은 한국 전체 승차 × JP.TOTAL_RATIO 가 되도록 줄임(한국보다 조금 많게)
     jadm = json.load(open(os.path.join(RAW, 'jpn_adm1.geojson'), encoding='utf-8'))['features']
     jreg = {n: rid_ for rid_, _, ns in JP.JP_REGIONS for n in ns}
-    kr_on = sum(st['on'] for st in stations if not st.get('est'))
     jp_used = []
     for *_x, seq in JP_LINES:
         for s in seq.split():
             if s not in idx and s not in jp_used: jp_used.append(s)
     osm_j = {v: k for k, v in JP_NAME.items()}
     jp_tot = sum(_jpc[osm_j[s]][2] for s in jp_used)
-    jscale = kr_on / jp_tot
+    jscale = kr_on * JP.TOTAL_RATIO / jp_tot
     print(f'일본 승객 비율: 실제 하루 승하차 × {jscale:.3f} (일본 주요역 {jp_tot:,} → 한국 전체 승차 {kr_on:,})', file=sys.stderr)
     for s in jp_used:
         lon, lat, ps = _jpc[osm_j[s]]
