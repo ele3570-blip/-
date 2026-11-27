@@ -357,7 +357,7 @@ def main():
     print(f'중국 승객: 인구 추정^{CN.FLATTEN} × {cscale:.2f} → 한국 전체의 {CN.TOTAL_RATIO:.0%}', file=sys.stderr)
     for s in cn_used:
         lon, lat, _pop = CN.STATIONS[osm_c[s]]
-        on = round(raw[s] * cscale)
+        on = max(100, round(raw[s] * cscale))
         idx[s] = len(stations)
         stations.append({'name': s, 'lon': lon, 'lat': lat, 'on': on, 'off': on, 'ktx': 0,
                          'region': creg[locate(lon, lat, cadm)['shapeName']], 'si': '', 'cn': 1})
