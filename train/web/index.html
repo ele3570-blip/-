@@ -109,8 +109,11 @@
   .hintbtns { display: flex; gap: 6px; justify-content: flex-end; margin-top: 6px; }
   .hintbtns button { padding: 6px 12px; }
   #hint { max-width: calc(100% - 24px); }
+  /* 속도: 폰·웹 모두 ⏸ + 누를 때마다 바뀌는 버튼 하나(1→3→10→30→100x) */
+  #topbar #sp1, #topbar #sp2, #topbar #sp3, #topbar #sp4, #topbar #sp5 { display: none; }
+  #topbar #sp0, #topbar #spCycle { min-width: 44px; font-weight: 700; }
+  #topbar #spCycle { min-width: 66px; }
   /* 좁은 화면(폰) */
-  #spCycle { display: none; }
   .stopseq { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; margin: 2px 0 6px; line-height: 1.5; }
   .stopno { background: #fff; border: 1px solid #c7d2fe; border-radius: 999px; padding: 1px 8px; font-size: 13px; white-space: nowrap; }
   .stopno b { color: #4338ca; }
