@@ -1573,7 +1573,7 @@ function focusRoute(r) { fitStations(r.stops.map(id => stations[id])); }
 
 // 속도: 보통 2·5·10배. 개발자용(window.RAIL_DEV, dev.html)은 30·100배와 '이번 달 마무리'
 const DEV = !!window.RAIL_DEV;
-const APP_VERSION = '0.50'; // 앱 versionName 과 같게(빌드할 때 함께 올림)
+const APP_VERSION = '0.51'; // 앱 versionName 과 같게(빌드할 때 함께 올림)
 $('homeVer').textContent = `버전 v${APP_VERSION}${DEV ? ' · 개발자용' : ''}`;
 const SPEEDS = DEV ? [0, 30, 100] : [0, 2, 5, 10];
 SPEEDS.forEach((v, i) => { if (i) { $('sp' + i).textContent = `${v}x`; $('sp' + i).title = `${v}배속`; } });
@@ -1595,9 +1595,11 @@ if (DEV) {
   const placeSkip = () => { if (narrow.matches) { b.innerHTML = '⏭ <span>마무리</span>'; b.style.cssText = ''; $('dock').appendChild(b); }
     else { b.innerHTML = '⏭ 이번 달 마무리'; b.style.cssText = 'background:#fef3c7;border-color:#f59e0b;font-weight:700;white-space:nowrap;flex:none'; $('spCycle').after(b); } };
   placeSkip(); narrow.addEventListener?.('change', placeSkip);
-  b.onclick = () => {
+  b.onclick = async () => {
     if ($('modal').style.display === 'flex') return toast('열린 창을 먼저 닫으세요');
-    G.paused = true; setSpeedUI();
+    const was = G.paused; G.paused = true; setSpeedUI();
+    const d = S.dateOf(); let left = 0; while (!S.isMonthEnd(G.day + left)) left++;
+    if (!await ask(`이번 달 마지막 날(${d.m}월 ${S.dateOf(G.day + left).d}일)까지 ${left ? `${left + 1}일을` : '오늘을'} 바로 진행하고 월 결산을 볼까요?`, '건너뛰기')) { G.paused = was; setSpeedUI(); return; }
     for (let guard = 0; guard < 40; guard++) {
       while (G.t < CFG.dayEndMin) S.tick(0.5);
       const last = S.isMonthEnd();
