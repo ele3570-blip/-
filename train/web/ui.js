@@ -1595,7 +1595,7 @@ function focusRoute(r) { fitStations(r.stops.map(id => stations[id])); }
 
 // 속도: 보통 2·5·10배. 개발자용(window.RAIL_DEV, dev.html)은 30·100배와 '이번 달 마무리'
 const DEV = !!window.RAIL_DEV;
-const APP_VERSION = '0.54'; // 앱 versionName 과 같게(빌드할 때 함께 올림)
+const APP_VERSION = '0.55'; // 앱 versionName 과 같게(빌드할 때 함께 올림)
 $('homeVer').textContent = `버전 v${APP_VERSION}${DEV ? ' · 개발자용' : ''}`;
 const SPEEDS = DEV ? [0, 30, 100] : [0, 2, 5, 10];
 SPEEDS.forEach((v, i) => { if (i) { $('sp' + i).textContent = `${v}x`; $('sp' + i).title = `${v}배속`; } });
@@ -1622,13 +1622,21 @@ if (DEV) {
     const was = G.paused; G.paused = true; setSpeedUI();
     const d = S.dateOf(); let left = 0; while (!S.isMonthEnd(G.day + left)) left++;
     if (!await ask(`이번 달 마지막 날(${d.m}월 ${S.dateOf(G.day + left).d}일)까지 ${left ? `${left + 1}일을` : '오늘을'} 바로 진행하고 월 결산을 볼까요?`, '건너뛰기')) { G.paused = was; setSpeedUI(); return; }
-    for (let guard = 0; guard < 40; guard++) {
-      while (G.t < CFG.dayEndMin) S.tick(0.5);
-      const last = S.isMonthEnd();
-      endDay();
-      if (last || G.over || $('modal').style.display === 'flex') break; // 월 결산(또는 해저터널 개통 등) 창이 뜨면 멈춤
-    }
-    refreshAll();
+    // 빠르게: 2분 단위로 계산(0.5분 단위와 결과 차이 약 1%), 중간 날은 화면을 다시 그리지 않고, 하루씩 끊어서 진행 상황을 보여 줌
+    const total = left + 1; let done = 0;
+    showModal(`<h3 style="margin:0 0 8px">⏭ 건너뛰는 중…</h3><div class="lvbar" style="display:block;height:8px"><i id="skipBar" style="width:0%"></i></div><div class="muted" id="skipTxt" style="margin-top:6px">0 / ${total}일</div>`);
+    const step = () => {
+      while (G.t < CFG.dayEndMin) S.tick(2);
+      done++;
+      if (S.isMonthEnd() || done >= total) { hideModal(); endDay(); refreshAll(); return; } // 마지막 날: 월 결산 창
+      const R = S.closeDay();
+      if (R.over) { hideModal(); G.over = true; save(); refreshAll(); return toast('파산했습니다'); }
+      S.startNextDay();
+      if (G.tunnelNews) { hideModal(); tunnelNews(); refreshAll(); return; } // 해저터널 개통 알림이 뜨면 멈춤
+      $('skipBar').style.width = `${Math.round(done / total * 100)}%`; $('skipTxt').textContent = `${done} / ${total}일 · ${dateTxt()}`;
+      setTimeout(step, 0);
+    };
+    setTimeout(step, 30);
   };
   document.title = '[개발자용] ' + document.title;
 }
