@@ -109,8 +109,8 @@ const CFG = {
     { need: 6_000_000_000,    desc: '전철화 공사 · 무궁화호 · 새마을호' },
     { need: 12_000_000_000,   desc: '광역전철 6량 · 복선화 공사 · 충북 지역 · 누리로' },
     { need: 20_000_000_000,   desc: '대전·충남·세종 지역' },
-    { need: 40_000_000_000,   desc: 'KTX(전철화된 일반선만) · ITX-새마을' },
-    { need: 80_000_000_000,   desc: '고속선 구간 구입 · KTX-산천' },
+    { need: 40_000_000_000,   desc: 'KTX · 고속선 구간 구입 · ITX-새마을' },
+    { need: 80_000_000_000,   desc: 'KTX-산천' },
     { need: 140_000_000_000,  desc: '수도권 지역 · KTX-이음' },
     { need: 240_000_000_000,  desc: '북한 개성·황해 지역(도라산–개성)' },
     { need: 400_000_000_000,  desc: 'ITX-마음 · 고속화 공사 · 강원 지역' },
@@ -142,7 +142,7 @@ const CFG = {
               cn_dongbei: 19, cn_huabei: 20, cn_huadong: 21, cn_huazhong: 21, cn_huanan: 22, cn_xibei: 22, cn_xinan: 22, // 중국: 국경(신의주·남양)에서 동북부터
               jp_kyushu: 23, jp_chugoku: 24, jp_shikoku: 24, jp_kansai: 25, jp_chubu: 26, jp_kanto: 26, jp_tohoku: 27, jp_hokkaido: 27 }, // 일본: 해저터널 개통 뒤 규슈부터 이어진 순서로 // 북한: 수도권(경의선 도라산)에서 개성으로
     work: { elec: 6, dbl: 7, speed: 13 },
-    hs: 10,
+    hs: 9, // 고속선은 KTX와 같이
     tunnel: 23, // 한일 해저터널 공사
   },
   tunnel: { cost: 1_000_000_000_000, days: 365 },

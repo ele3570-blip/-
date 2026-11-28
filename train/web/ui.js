@@ -1573,7 +1573,7 @@ function focusRoute(r) { fitStations(r.stops.map(id => stations[id])); }
 
 // 속도: 보통 2·5·10배. 개발자용(window.RAIL_DEV, dev.html)은 30·100배와 '이번 달 마무리'
 const DEV = !!window.RAIL_DEV;
-const APP_VERSION = '0.51'; // 앱 versionName 과 같게(빌드할 때 함께 올림)
+const APP_VERSION = '0.52'; // 앱 versionName 과 같게(빌드할 때 함께 올림)
 $('homeVer').textContent = `버전 v${APP_VERSION}${DEV ? ' · 개발자용' : ''}`;
 const SPEEDS = DEV ? [0, 30, 100] : [0, 2, 5, 10];
 SPEEDS.forEach((v, i) => { if (i) { $('sp' + i).textContent = `${v}x`; $('sp' + i).title = `${v}배속`; } });
