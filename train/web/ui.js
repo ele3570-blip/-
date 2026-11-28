@@ -439,6 +439,7 @@ function stationHtml(s) {
   if (open) {
     h += `<div style="margin-top:6px">🧍 기다리는 승객 <b>${fmt(q.length)}</b>명 · 지나는 노선 ${rs.length}개${T ? ` · 이어진 수요 ${Math.round(T.served * 100)}%` : ''}</div>`;
     h += boardHtml(s);
+    h += devHtml(s);
     if (q.length) {
       const cnt = new Map(); for (const p of q) cnt.set(p.dest, (cnt.get(p.dest) || 0) + 1);
       const top = [...cnt].sort((a, b) => b[1] - a[1]).slice(0, 6), nx = q.filter(p => p.transfer).length;
@@ -530,6 +531,21 @@ function openTTView(r) {
       <div><b>${esc(B)} → ${esc(A)}</b><table style="font-size:13px;width:100%;white-space:nowrap">${col(1)}</table></div>
     </div><button class="primary" id="askNo" style="width:100%;margin-top:10px">닫기</button>`);
   $('askNo').onclick = hideModal;
+}
+// 역세권 개발: 단계·효과·다음 단계 버튼
+function devHtml(s) {
+  if (!S.stOwned(s)) return '';
+  const L = CFG.dev.levels, k = S.devLvl(s), nx = L[k + 1], d = G.stDev[s.id];
+  const steps = L.slice(1).map((x, i) => `<span class="tag ${i < k ? 'ok' : 'gray'}">${x.icon} ${x.name}</span>`).join(' ');
+  let btn = '';
+  if (nx) { const why = S.devBlock(s), c = S.devCost(s);
+    btn = lvLocked(nx.gate) ? `<button disabled>${lockTag(nx.gate)} ${nx.icon} ${nx.name}</button>`
+      : `<button class="primary" data-dev="${s.id}" ${why ? `disabled title="${esc(why)}"` : ''}>${nx.icon} ${nx.name} 짓기 ${won(c)}</button>`; }
+  return `<div class="wbox"><div class="wsub">🏙️ 역세권 개발</div>
+    <div style="display:flex;flex-wrap:wrap;gap:4px;margin-bottom:4px">${steps}</div>
+    <div class="muted" style="font-size:12px">${k ? `지금 승객 <b>+${Math.round((L[k].mul - 1) * 100)}%</b> · 임대 수입 하루 ${won(Math.round(d.paid * CFG.dev.rent))} (들인 돈 ${won(d.paid)})` : '아직 개발 안 함'}
+      ${nx ? `<br>다음: ${nx.icon} ${nx.name} → 승객 +${Math.round((nx.mul - 1) * 100)}%(이 역에서 타는 사람·오는 사람), 임대 수입 하루 +${won(Math.round(S.devCost(s) * CFG.dev.rent))}` : ''}</div>
+    ${btn ? `<div class="btns" style="margin-top:6px">${btn}</div>` : ''}</div>`;
 }
 // 역 출발 안내판: 이 역에서 다음에 떠나는 열차들
 function boardHtml(s) {
@@ -970,6 +986,7 @@ function renderHelp() {
     · 🚂 완행열차: 비둘기호 → 통일호 → 무궁화호 (싸고 느림, 모든 선로)<br>
     · 🚆 일반열차: 새마을호 → 누리로 → ITX-새마을 → ITX-마음 (누리로부터 전철화 선로만)<br>
     · 🚈 광역열차: 대경선 같은 지역 통근열차. 전철화 선로만. 광역열차만 태우는 <b>통근 승객</b>(4~70km, 출퇴근 7~9시·17~19시에 몰림)이 따로 있고, 배차가 잦을수록(10~20분) 크게 늘어납니다. 대도시 주변(대구·대전·수도권)에서 유리<br>
+    · 🏙️ 역세권 개발: 산 역을 누르면 역 상가(+10%) → 환승센터(Lv${CFG.dev.levels[2].gate}, +25%) → 역세권 복합개발(Lv${CFG.dev.levels[3].gate}, +45%). 그 역 승객이 늘고 들인 돈의 ${(CFG.dev.rent * 100).toFixed(2)}%가 매일 임대 수입<br>
     · 🏢 해외 사업권: 🇨🇳 중국(Lv${CFG.license.cn.gate}, ${won(CFG.license.cn.cost)}) · 🇯🇵 일본(Lv${CFG.license.jp.gate}, ${won(CFG.license.jp.cost)}). 🗺️ 지역에서 삼. 사야 그 나라 지역을 열고 열차를 살 수 있음<br>
     · 🇨🇳 중국(Lv${CFG.gate.region.cn_dongbei}): 북한 신의주–단둥, 남양–투먼 국경으로 동북부터 차례로. 국경은 KTX와 중국 고속 동차만. 중국 선로는 중국 열차만(보통·쾌속, 고속 동차). 통근 승객(광역열차)은 한국에만. 승객이 많지만 운임이 쌈. 노선 모양은 직선<br>
     · 🌊 한일 해저터널(Lv${CFG.gate.tunnel}, ${won(CFG.tunnel.cost)}, ${CFG.tunnel.days}일): 🗺️ 지역에서 공사. 개통하면 일본 지역을 규슈부터 차례로 열 수 있음. 터널은 KTX·신칸센만, 일본 선로는 일본 열차만(보통·쾌속, 특급, 신칸센)<br>
@@ -1049,7 +1066,7 @@ function renderTop() {
   $('cover').textContent = G.today.potential ? (G.today.pax / G.today.potential * 100).toFixed(1) + '%' : '-';
   const pk = S.peakAt(G.t), el = $('peak');
   el.style.display = pk ? '' : 'none'; if (pk) el.textContent = `${pk.icon} ${pk.name} 시간`;
-  const M = G.mon, mp = M.revenue - M.opCost - M.fixed - (M.upkeep || 0) - M.interest + M.pso + G.today.revenue - G.today.cost;
+  const M = G.mon, mp = M.revenue - M.opCost - M.fixed - (M.upkeep || 0) - M.interest + M.pso + (M.rent || 0) + G.today.revenue - G.today.cost;
   $('todayStat').textContent = `오늘 ${fmt(G.today.pax)}명 · 이번 달 ${fmt(M.pax + G.today.pax)}명 · 이번 달 손익 ${won(mp)}`;
 }
 function refreshAll() { assignSlots(); renderPanel(); renderInfo(); renderBadges(); renderTop(); save(); }
@@ -1525,6 +1542,7 @@ document.addEventListener('click', e => {
     refreshAll();
   }
   else if (d.tiers) openTierTable();
+  else if (d.dev) { const st = stations[+d.dev], nx = CFG.dev.levels[S.devLvl(st) + 1]; ask(`${st.name}역에 ${nx.icon} ${josa(nx.name, '을', '를')} ${won(S.devCost(st))}에 지을까요? 승객 +${Math.round((nx.mul - 1) * 100)}%`, '짓기').then(ok => { if (ok) check(S.developStation(st), `${st.name}역 ${nx.name} 완공`); }); }
   else if (d.license) { const L = CFG.license[d.license]; ask(`${L.name}을 ${won(L.cost)}에 살까요?`, '사업권 사기').then(ok => { if (ok) check(S.buyLicense(d.license), `${L.icon} ${L.name}을 샀습니다`); }); }
   else if (d.tunnel) ask(`한일 해저터널 공사를 ${won(CFG.tunnel.cost)}에 시작할까요? ${CFG.tunnel.days}일 뒤 개통합니다`, '공사 시작').then(ok => { if (ok) check(S.startTunnel(), '🚧 한일 해저터널 공사를 시작했습니다'); });
   else if (d.ttedit) openTTEdit(findR(d.ttedit));
@@ -1573,7 +1591,7 @@ function focusRoute(r) { fitStations(r.stops.map(id => stations[id])); }
 
 // 속도: 보통 2·5·10배. 개발자용(window.RAIL_DEV, dev.html)은 30·100배와 '이번 달 마무리'
 const DEV = !!window.RAIL_DEV;
-const APP_VERSION = '0.52'; // 앱 versionName 과 같게(빌드할 때 함께 올림)
+const APP_VERSION = '0.53'; // 앱 versionName 과 같게(빌드할 때 함께 올림)
 $('homeVer').textContent = `버전 v${APP_VERSION}${DEV ? ' · 개발자용' : ''}`;
 const SPEEDS = DEV ? [0, 30, 100] : [0, 2, 5, 10];
 SPEEDS.forEach((v, i) => { if (i) { $('sp' + i).textContent = `${v}x`; $('sp' + i).title = `${v}배속`; } });
@@ -1666,6 +1684,7 @@ function endDay() {
       <tr><td>선로·역 유지비</td><td class="neg">-${won(M.upkeep || 0)}</td></tr>
       ${M.interest ? `<tr><td>대출 이자</td><td class="neg">-${won(M.interest)}</td></tr>` : ''}
       <tr><td>공익서비스 보상금</td><td class="pos">+${won(M.pso)}</td></tr>
+      <tr><td>역세권 임대 수입</td><td class="pos">+${won(M.rent || 0)}</td></tr>
       <tr><td><b>영업 순이익</b></td><td class="${M.profit >= 0 ? 'pos' : 'neg'}"><b>${won(M.profit)}</b></td></tr>
       <tr><td>투자 (지역·역·선로·열차·개량)</td><td class="muted">${won(M.bought)}</td></tr>
       <tr><td>보유 자금</td><td>${won(M.money)} <span class="${cash >= 0 ? 'pos' : 'neg'}">(${cash >= 0 ? '+' : ''}${won(cash)})</span></td></tr>

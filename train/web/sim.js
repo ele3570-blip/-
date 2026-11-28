@@ -146,6 +146,14 @@ const CFG = {
     tunnel: 23, // 한일 해저터널 공사
   },
   tunnel: { cost: 1_000_000_000_000, days: 365 },
+  // 역세권 개발: 산 역에 단계별로. 그 역의 승객(타는 사람·오는 사람)이 늘고, 들인 돈의 일부가 매일 임대 수입
+  // 값 = 그 역 값 × cost, 임대 = 지금까지 들인 돈 × rent(하루)
+  dev: { rent: 0.0015, levels: [
+    { name: '개발 없음', mul: 1 },
+    { name: '역 상가', icon: '🏪', mul: 1.10, cost: 1.0, gate: 1 },
+    { name: '환승센터', icon: '🚏', mul: 1.25, cost: 2.5, gate: 4 },
+    { name: '역세권 복합개발', icon: '🏙️', mul: 1.45, cost: 5.0, gate: 7 },
+  ] },
   // 해외 사업권: 사야 그 나라 지역을 열고 그 나라 열차를 살 수 있음(한 번만)
   license: { cn: { name: '중국 철도 사업권', icon: '🇨🇳', gate: 19, cost: 300_000_000_000 },
              jp: { name: '일본 철도 사업권', icon: '🇯🇵', gate: 23, cost: 500_000_000_000 } },
@@ -253,6 +261,7 @@ const freshState = () => ({
   mon: null, // 이번 달 누계(월 결산)
   tunnel: null, // 한일 해저터널: { start, end, done }
   licenses: new Set(), // 산 해외 사업권(cn, jp)
+  stDev: {}, // 역세권 개발: 역 id → { lvl, paid }
 });
 const G = freshState();
 // 물가 배율
@@ -289,6 +298,8 @@ function newMonth() {
 G.mon = newMonth();
 
 const isOpen = s => G.unlocked.has(s.region);
+const devLvl = s => G.stDev?.[s.id]?.lvl || 0;
+const devMul = s => CFG.dev.levels[devLvl(s)].mul; // 역세권 개발로 늘어난 승객 배율
 const lineElec = l => l.elec || !!G.lineUp[l.id]?.elec;
 const lineDbl = l => l.dbl || !!G.lineUp[l.id]?.dbl;
 const lineVmax = l => l.vmax + (G.lineUp[l.id]?.speed || 0);
@@ -587,7 +598,7 @@ function destWeights(o) {
     if (d === o) continue;
     const km = distKm(o, d);
     if (km < CFG.minTripKm) continue;
-    w.set(d.id, (d.off + 1) * (Math.exp(-km / CFG.tripDecayKm) + CFG.tripFloor + CFG.tripLocal * Math.exp(-km / CFG.tripLocalKm)));
+    w.set(d.id, (d.off * devMul(d) + 1) * (Math.exp(-km / CFG.tripDecayKm) + CFG.tripFloor + CFG.tripLocal * Math.exp(-km / CFG.tripLocalKm)));
   }
   baseWeight.set(o.id, w);
   return w;
@@ -690,7 +701,7 @@ function rebuildNetwork() {
       for (let i = 0; i < r.stops.length; i++) for (let j = i + 1; j < r.stops.length; j++) {
         const km = Math.abs(r.cumKm[j] - r.cumKm[i]); if (km < C.minKm || km > C.maxKm) continue;
         const A = stations[r.stops[i]], B = stations[r.stops[j]];
-        const fl = x => Math.max(x.on, /구$/.test(x.si) ? C.cityFloor : C.townFloor);
+        const fl = x => Math.max(x.on * devMul(x), /구$/.test(x.si) ? C.cityFloor : C.townFloor);
         const w = C.k * Math.sqrt(fl(A) * fl(B)) * Math.exp(-km / C.decayKm) * q;
         add(A.id, B.id, w, r); add(B.id, A.id, w, r);
       }
@@ -722,7 +733,7 @@ function spawn(dt) {
   const share = hourShare(G.t) / 60 * dt;
   for (const s of stations) {
     if (!isOpen(s)) continue;
-    const base = s.on * CFG.demandScale * share;
+    const base = s.on * devMul(s) * CFG.demandScale * share;
     G.today.potential += base;
     const T = destTable.get(s.id);
     if (!T || !T.total) continue;
@@ -924,6 +935,7 @@ function closeDay() {
   let pso = 0;
   if (profit < 0 && sat != null && sat >= CFG.psoMinSat) pso = Math.round(-profit * CFG.psoRatio);
   G.money += pso;
+  const rent = rentPerDay(); G.money += rent; T.rent = rent; // 역세권 임대 수입(운임이 아니라 레벨에는 안 셈)
   // 대출 이자
   const grade = creditGrade();
   const interest = Math.round(G.debt * CFG.loan.grades[grade].rate);
@@ -956,7 +968,7 @@ function closeDay() {
   // 이번 달 누계
   const M = G.mon;
   M.days++; M.commute = (M.commute || 0) + T.commute; for (const k of ['runsDone', 'onTime', 'cancel', 'soldOut', 'noRun']) M[k] = (M[k] || 0) + (T[k] || 0); M.pax += T.pax; M.transfers += T.transfers; M.gaveUp += T.gaveUp; M.leftBehind += T.leftBehind; M.potential += T.potential;
-  M.revenue += T.revenue; M.opCost += T.cost - fixed - upkeep; M.fixed += fixed; M.upkeep = (M.upkeep || 0) + upkeep; M.interest += interest; M.pso += pso; M.bought += T.bought; M.trainKm += T.trainKm;
+  M.revenue += T.revenue; M.opCost += T.cost - fixed - upkeep; M.fixed += fixed; M.upkeep = (M.upkeep || 0) + upkeep; M.interest += interest; M.pso += pso; M.rent = (M.rent || 0) + rent; M.bought += T.bought; M.trainKm += T.trainKm;
   if (sat != null) { M.satSum += sat; M.satDays++; }
   M.sold.push(...sold); M.negMax = Math.max(M.negMax, G.negDays);
   for (const r of G.routes) {
@@ -969,7 +981,7 @@ function closeDay() {
 // 월 결산 요약(달이 끝난 뒤 보여 주고 startMonth로 넘어감)
 function monthReport() {
   const M = G.mon;
-  const profit = M.revenue - M.opCost - M.fixed - (M.upkeep || 0) - M.interest + M.pso;
+  const profit = M.revenue - M.opCost - M.fixed - (M.upkeep || 0) - M.interest + M.pso + (M.rent || 0);
   const routes = G.routes.map(r => ({ r, ...(r.mon || { pax: 0, rev: 0, cost: 0, left: 0 }) })).sort((a, b) => (b.rev - b.cost) - (a.rev - a.cost));
   return { ...M, profit, sat: M.satDays ? M.satSum / M.satDays : null, cover: M.potential ? M.pax / M.potential * 100 : 0,
     rep: G.rep, money: G.money, debt: G.debt, grade: creditGrade(), routes, date: dateOf(M.startDay) };
@@ -1330,6 +1342,25 @@ function finishTunnel() {
   for (const e of l.edges) for (const id of [e.a, e.b]) if (stations[id].region === stations[l.edges[1].a].region) G.ownedSt.add(id);
   rebuildNetwork();
 }
+// 역세권 개발
+function devCost(s) { const L = CFG.dev.levels[devLvl(s) + 1]; return L ? r100k(stationPrice(s) * L.cost) || 100_000 : null; }
+function devBlock(s) {
+  const L = CFG.dev.levels[devLvl(s) + 1];
+  if (!L) return '마지막 단계까지 개발했습니다';
+  if (!stOwned(s)) return '먼저 역을 사야 합니다';
+  const e = lvErr(L.gate); if (e) return e;
+  if (G.money < devCost(s)) return '돈이 부족합니다';
+  return null;
+}
+function developStation(s) {
+  const why = devBlock(s); if (why) return { err: why };
+  const c = devCost(s);
+  G.money -= c; G.today.bought += c;
+  const d = G.stDev[s.id] || (G.stDev[s.id] = { lvl: 0, paid: 0 }); d.lvl++; d.paid += c;
+  baseWeight.clear(); rebuildNetwork(); // 오는 승객(목적지 끌림)도 바뀜
+  return {};
+}
+const rentPerDay = () => Math.round(Object.values(G.stDev || {}).reduce((a, d) => a + d.paid, 0) * CFG.dev.rent);
 // 해외 사업권
 const licenseOf = region => region.startsWith('cn_') ? 'cn' : region.startsWith('jp_') && region !== 'jp_tunnel' ? 'jp' : null;
 function licenseBlock(c) {
@@ -1393,7 +1424,7 @@ const SAVE_KEY = 'korea-rail-save-v3'; // v3: 동대구역 + 무궁화 1대로 �
 function serialize() {
   return JSON.stringify({
     kindsVer: 2, money: G.money, totalRev: G.totalRev, shownLevel: G.shownLevel, debt: G.debt, negDays: G.negDays, over: G.over, day: G.day, rep: G.rep, unlocked: [...G.unlocked], lineUp: G.lineUp, ownedSecs: [...G.ownedSecs], ownedSt: [...G.ownedSt],
-    nextRouteNo: G.nextRouteNo, nextTrainId: G.nextTrainId, history: G.history, tunnel: G.tunnel, licenses: [...G.licenses],
+    nextRouteNo: G.nextRouteNo, nextTrainId: G.nextTrainId, history: G.history, tunnel: G.tunnel, licenses: [...G.licenses], stDev: G.stDev,
     mon: G.mon,
     routes: G.routes.map(r => ({ no: r.no, kind: r.kind, color: r.color, stops: r.stops, name: r.name, mon: r.mon, tt: r.tt, yest: r.yest, yestB: r.yestB, yestN: r.yestN, yestRev: r.yestRev, yestCost: r.yestCost, recHist: r.recHist, recShown: r.recShown })), // 어제 기록·추천 열차 수
     trains: G.trains.map(t => ({ id: t.id, no: t.no, kind: t.kind, lvl: t.lvl, route: t.route.no, i: t.i, dir: t.dir, paid: t.paid })),
@@ -1424,7 +1455,7 @@ function deserialize(s) {
   const estRev = (o.history || []).reduce((a, h) => a + (h.revenue || 0), 0) + (o.mon?.revenue || 0);
   Object.assign(G, { money: o.money, totalRev: o.totalRev ?? estRev, shownLevel: Math.min(o.shownLevel ?? 99, levelOf(o.totalRev ?? estRev)) /* 레벨 기준이 바뀌어 내려갔으면 지금 레벨로 */, debt: o.debt || 0, negDays: o.negDays || 0, over: !!o.over, day: o.day, rep: o.rep, unlocked: new Set(o.unlocked), lineUp: o.lineUp || {},
     ownedSecs: new Set(o.ownedSecs || []), ownedSt: new Set(o.ownedSt || []),
-    nextRouteNo: o.nextRouteNo, nextTrainId: o.nextTrainId, history: o.history || [], t: CFG.dayStartMin, today: newToday(), waiting: new Map(), tunnel: o.tunnel || null, licenses: new Set(o.licenses || []) });
+    nextRouteNo: o.nextRouteNo, nextTrainId: o.nextTrainId, history: o.history || [], t: CFG.dayStartMin, today: newToday(), waiting: new Map(), tunnel: o.tunnel || null, licenses: new Set(o.licenses || []), stDev: o.stDev || {} });
   G.mon = o.mon || newMonth();
   // v0.31~v0.34 불러오기 버그 복구: 날짜·연 지역이 처음 값으로 돌아갔던 저장 → 결산 기록·산 역/구간으로 되살림
   { const last = Math.max(0, ...G.history.map(h => h.day || 0));
@@ -1447,7 +1478,7 @@ function deserialize(s) {
   G.depot = o.depot.map(t => ({ ...t })).concat(G.depot.filter(x => !o.depot.some(y => y.id === x.id)));
   numberTrains(); // 예전 저장: 번호 없는 열차에 종류별 번호
   G.pend = [];
-  rebuildNetwork();
+  baseWeight.clear(); rebuildNetwork(); // 역세권 개발이 목적지 끌림에 들어가서 다시 계산
   layoutAll();    // 불러오면 그날 아침: 시간표 첫 편에 맞춰 배치
 }
 // 게임을 처음 상태로(새 게임·불러오기 전에)
@@ -1465,7 +1496,7 @@ function setupNewGame() {
   rebuildNetwork();
 }
 
-root.SIM = { licenseOf, licenseBlock, buyLicense, priceMul, infMul, workCost, upkeepPerDay, levelGap, tunnelBlock, startTunnel, tunnelLine, ttNeed, recommendTT, TT_BANDS, NICE_HW, ttOf, depsOf, planTrains, oneWayMin, autoHw, ttBuild, layoutAll, respaceRoute, spacingRatio, get commuteTable() { return commuteTable; }, CFG, D, G, level, levelOf, levelNeed, needTrain, lvErr, resetGame, routeDiag, upgradeBlock, dateOf, isMonthEnd, monthReport, startMonth, assetValue, creditGrade, loanLimit, canBorrow, borrow, repay, stations, byName, lines, edges, adj, sections, secById, edgeOwned, stOwned, secOwned, stationPrice, buyStation,
+root.SIM = { devLvl, devMul, devCost, devBlock, developStation, rentPerDay, licenseOf, licenseBlock, buyLicense, priceMul, infMul, workCost, upkeepPerDay, levelGap, tunnelBlock, startTunnel, tunnelLine, ttNeed, recommendTT, TT_BANDS, NICE_HW, ttOf, depsOf, planTrains, oneWayMin, autoHw, ttBuild, layoutAll, respaceRoute, spacingRatio, get commuteTable() { return commuteTable; }, CFG, D, G, level, levelOf, levelNeed, needTrain, lvErr, resetGame, routeDiag, upgradeBlock, dateOf, isMonthEnd, monthReport, startMonth, assetValue, creditGrade, loanLimit, canBorrow, borrow, repay, stations, byName, lines, edges, adj, sections, secById, edgeOwned, stOwned, secOwned, stationPrice, buyStation,
   sectionPrice, buySection, missingSections, buySections, ownedKm, regionName, toKm, distKm, isOpen, lineElec, lineDbl, lineVmax, edgeOpen, edgeCap,
   kindOf, tierOf, needsElec, edgeAllowed, findPath, buildLegs, addRoute, routeTitle, routeKm, routeHasNonElec, routeOpen, routeTrains,
   legMinutes, edgeSpeed, cycleMinutes, headway, rideMinutes, rideKm, rebuildNetwork, planFrom, hourShare, peakAt, tick, satPct, closeDay, startNextDay,
