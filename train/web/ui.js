@@ -1573,6 +1573,8 @@ function focusRoute(r) { fitStations(r.stops.map(id => stations[id])); }
 
 // 속도: 보통 2·5·10배. 개발자용(window.RAIL_DEV, dev.html)은 30·100배와 '이번 달 마무리'
 const DEV = !!window.RAIL_DEV;
+const APP_VERSION = '0.49'; // 앱 versionName 과 같게(빌드할 때 함께 올림)
+$('homeVer').textContent = `버전 v${APP_VERSION}${DEV ? ' · 개발자용' : ''}`;
 const SPEEDS = DEV ? [0, 30, 100] : [0, 2, 5, 10];
 SPEEDS.forEach((v, i) => { if (i) { $('sp' + i).textContent = `${v}x`; $('sp' + i).title = `${v}배속`; } });
 function setSpeedUI() {
@@ -1590,7 +1592,7 @@ SPEEDS.forEach((v, i) => $('sp' + i).onclick = () => { if (!v) G.paused = !G.pau
 if (DEV) {
   const b = document.createElement('button'); b.id = 'devSkip'; b.textContent = '⏭ 이번 달 마무리'; b.title = '개발자용: 말일까지 바로 진행하고 월 결산';
   b.style.cssText = 'background:#fef3c7;border-color:#f59e0b;font-weight:700;white-space:nowrap';
-  $('spCycle').after(b);
+  document.body.appendChild(b); // 위쪽 막대 밖(화면 오른쪽 위)에 띄움: 폰에서 막대가 좁아 잘리지 않게
   b.onclick = () => {
     if ($('modal').style.display === 'flex') return toast('열린 창을 먼저 닫으세요');
     G.paused = true; setSpeedUI();
