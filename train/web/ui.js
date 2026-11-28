@@ -536,8 +536,12 @@ function openTTView(r) {
 function devHtml(s) {
   if (!S.stOwned(s)) return '';
   const L = CFG.dev.levels, k = S.devLvl(s), nx = L[k + 1], d = G.stDev[s.id];
-  const steps = L.slice(1).map((x, i) => `<span class="tag ${i < k ? 'ok' : 'gray'}">${x.icon} ${x.name}</span>`).join(' ');
+  const capMax = S.devCap(s).max;
+  const steps = L.slice(1, Math.max(capMax, k) + 1).map((x, i) => `<span class="tag ${i < k ? 'ok' : 'gray'}">${x.icon} ${x.name}</span>`).join(' ') + (capMax < 3 && capMax > 0 ? ` <span class="muted" style="font-size:11px">(${['', '소형·환승 아닌 역은 역 상가까지', '중형역은 환승센터까지'][capMax]})</span>` : '');
   let btn = '';
+  const cap = S.devCap(s);
+  if (k >= cap.max) return `<div class="wbox"><div class="wsub">🏙️ 역세권 개발</div>${k ? `<div style="display:flex;flex-wrap:wrap;gap:4px;margin-bottom:4px">${steps}</div><div class="muted" style="font-size:12px">지금 승객 <b>+${Math.round((L[k].mul - 1) * 100)}%</b> · 임대 수입 하루 ${won(Math.round(d.paid * CFG.dev.rent))}</div>` : ''}
+    <div class="muted" style="font-size:12px">${esc(k ? (nx ? cap.why : '마지막 단계까지 개발했습니다') : cap.why)}</div></div>`;
   if (nx) { const why = S.devBlock(s), c = S.devCost(s);
     btn = lvLocked(nx.gate) ? `<button disabled>${lockTag(nx.gate)} ${nx.icon} ${nx.name}</button>`
       : `<button class="primary" data-dev="${s.id}" ${why ? `disabled title="${esc(why)}"` : ''}>${nx.icon} ${nx.name} 짓기 ${won(c)}</button>`; }
@@ -986,7 +990,7 @@ function renderHelp() {
     · 🚂 완행열차: 비둘기호 → 통일호 → 무궁화호 (싸고 느림, 모든 선로)<br>
     · 🚆 일반열차: 새마을호 → 누리로 → ITX-새마을 → ITX-마음 (누리로부터 전철화 선로만)<br>
     · 🚈 광역열차: 대경선 같은 지역 통근열차. 전철화 선로만. 광역열차만 태우는 <b>통근 승객</b>(4~70km, 출퇴근 7~9시·17~19시에 몰림)이 따로 있고, 배차가 잦을수록(10~20분) 크게 늘어납니다. 대도시 주변(대구·대전·수도권)에서 유리<br>
-    · 🏙️ 역세권 개발: 산 역을 누르면 역 상가(+10%) → 환승센터(Lv${CFG.dev.levels[2].gate}, +25%) → 역세권 복합개발(Lv${CFG.dev.levels[3].gate}, +45%). 그 역 승객이 늘고 들인 돈의 ${(CFG.dev.rent * 100).toFixed(2)}%가 매일 임대 수입<br>
+    · 🏙️ 역세권 개발: 산 역을 누르면 역 상가(소형역부터, +10%) → 환승센터(중형 이상 환승역, Lv${CFG.dev.levels[2].gate}, +25%) → 역세권 복합개발(대형 이상 환승역, Lv${CFG.dev.levels[3].gate}, +45%). 간이역은 안 됨. 그 역 승객이 늘고 들인 돈의 ${(CFG.dev.rent * 100).toFixed(2)}%가 매일 임대 수입<br>
     · 🏢 해외 사업권: 🇨🇳 중국(Lv${CFG.license.cn.gate}, ${won(CFG.license.cn.cost)}) · 🇯🇵 일본(Lv${CFG.license.jp.gate}, ${won(CFG.license.jp.cost)}). 🗺️ 지역에서 삼. 사야 그 나라 지역을 열고 열차를 살 수 있음<br>
     · 🇨🇳 중국(Lv${CFG.gate.region.cn_dongbei}): 북한 신의주–단둥, 남양–투먼 국경으로 동북부터 차례로. 국경은 KTX와 중국 고속 동차만. 중국 선로는 중국 열차만(보통·쾌속, 고속 동차). 통근 승객(광역열차)은 한국에만. 승객이 많지만 운임이 쌈. 노선 모양은 직선<br>
     · 🌊 한일 해저터널(Lv${CFG.gate.tunnel}, ${won(CFG.tunnel.cost)}, ${CFG.tunnel.days}일): 🗺️ 지역에서 공사. 개통하면 일본 지역을 규슈부터 차례로 열 수 있음. 터널은 KTX·신칸센만, 일본 선로는 일본 열차만(보통·쾌속, 특급, 신칸센)<br>
@@ -1591,7 +1595,7 @@ function focusRoute(r) { fitStations(r.stops.map(id => stations[id])); }
 
 // 속도: 보통 2·5·10배. 개발자용(window.RAIL_DEV, dev.html)은 30·100배와 '이번 달 마무리'
 const DEV = !!window.RAIL_DEV;
-const APP_VERSION = '0.53'; // 앱 versionName 과 같게(빌드할 때 함께 올림)
+const APP_VERSION = '0.54'; // 앱 versionName 과 같게(빌드할 때 함께 올림)
 $('homeVer').textContent = `버전 v${APP_VERSION}${DEV ? ' · 개발자용' : ''}`;
 const SPEEDS = DEV ? [0, 30, 100] : [0, 2, 5, 10];
 SPEEDS.forEach((v, i) => { if (i) { $('sp' + i).textContent = `${v}x`; $('sp' + i).title = `${v}배속`; } });

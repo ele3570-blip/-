@@ -1342,11 +1342,21 @@ function finishTunnel() {
   for (const e of l.edges) for (const id of [e.a, e.b]) if (stations[id].region === stations[l.edges[1].a].region) G.ownedSt.add(id);
   rebuildNetwork();
 }
-// 역세권 개발
+// 역세권 개발: 역 크기(하루 승차)마다 할 수 있는 단계가 다르고, 환승센터부터는 환승역(선로 둘 이상이 만나는 역)만
+const stSize = s => s.on < 200 ? 0 : s.on < 1000 ? 1 : s.on < 4000 ? 2 : 3; // 간이·소형·중형·대형 이상
+const SIZE_NAME = ['간이역', '소형역', '중형역', '대형역'];
+const isHub = s => new Set(adj[s.id].map(e => e.line.id)).size >= 2;
+function devCap(s) { // 이 역이 갈 수 있는 마지막 단계와, 더 못 가는 이유
+  const size = stSize(s), bySize = [0, 1, 2, 3][size];
+  if (bySize >= 2 && !isHub(s)) return { max: 1, why: '환승센터부터는 환승역(선로 둘 이상이 만나는 역)만 지을 수 있습니다' };
+  const why = size === 0 ? '간이역은 개발할 수 없습니다' : size === 1 ? '소형역은 역 상가까지만 지을 수 있습니다' : size === 2 ? '중형역은 환승센터까지만 지을 수 있습니다(복합개발은 대형역부터)' : '';
+  return { max: bySize, why };
+}
 function devCost(s) { const L = CFG.dev.levels[devLvl(s) + 1]; return L ? r100k(stationPrice(s) * L.cost) || 100_000 : null; }
 function devBlock(s) {
   const L = CFG.dev.levels[devLvl(s) + 1];
   if (!L) return '마지막 단계까지 개발했습니다';
+  { const c = devCap(s); if (devLvl(s) >= c.max) return c.why || '더 개발할 수 없습니다'; }
   if (!stOwned(s)) return '먼저 역을 사야 합니다';
   const e = lvErr(L.gate); if (e) return e;
   if (G.money < devCost(s)) return '돈이 부족합니다';
@@ -1496,7 +1506,7 @@ function setupNewGame() {
   rebuildNetwork();
 }
 
-root.SIM = { devLvl, devMul, devCost, devBlock, developStation, rentPerDay, licenseOf, licenseBlock, buyLicense, priceMul, infMul, workCost, upkeepPerDay, levelGap, tunnelBlock, startTunnel, tunnelLine, ttNeed, recommendTT, TT_BANDS, NICE_HW, ttOf, depsOf, planTrains, oneWayMin, autoHw, ttBuild, layoutAll, respaceRoute, spacingRatio, get commuteTable() { return commuteTable; }, CFG, D, G, level, levelOf, levelNeed, needTrain, lvErr, resetGame, routeDiag, upgradeBlock, dateOf, isMonthEnd, monthReport, startMonth, assetValue, creditGrade, loanLimit, canBorrow, borrow, repay, stations, byName, lines, edges, adj, sections, secById, edgeOwned, stOwned, secOwned, stationPrice, buyStation,
+root.SIM = { devCap, stSize, isHub, devLvl, devMul, devCost, devBlock, developStation, rentPerDay, licenseOf, licenseBlock, buyLicense, priceMul, infMul, workCost, upkeepPerDay, levelGap, tunnelBlock, startTunnel, tunnelLine, ttNeed, recommendTT, TT_BANDS, NICE_HW, ttOf, depsOf, planTrains, oneWayMin, autoHw, ttBuild, layoutAll, respaceRoute, spacingRatio, get commuteTable() { return commuteTable; }, CFG, D, G, level, levelOf, levelNeed, needTrain, lvErr, resetGame, routeDiag, upgradeBlock, dateOf, isMonthEnd, monthReport, startMonth, assetValue, creditGrade, loanLimit, canBorrow, borrow, repay, stations, byName, lines, edges, adj, sections, secById, edgeOwned, stOwned, secOwned, stationPrice, buyStation,
   sectionPrice, buySection, missingSections, buySections, ownedKm, regionName, toKm, distKm, isOpen, lineElec, lineDbl, lineVmax, edgeOpen, edgeCap,
   kindOf, tierOf, needsElec, edgeAllowed, findPath, buildLegs, addRoute, routeTitle, routeKm, routeHasNonElec, routeOpen, routeTrains,
   legMinutes, edgeSpeed, cycleMinutes, headway, rideMinutes, rideKm, rebuildNetwork, planFrom, hourShare, peakAt, tick, satPct, closeDay, startNextDay,
